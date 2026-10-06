@@ -1,0 +1,6 @@
+{
+  "name": "Quản trị Hiệu suất Công tác Nội trú",
+  "description": "Hệ thống Quản trị Hiệu suất và Vận hành Giáo viên Quản nhiệm Nội trú (BOPS)",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

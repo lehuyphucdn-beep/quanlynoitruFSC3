@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Quản trị Hiệu suất Công tác Nội trú</title>
+    <meta name="description" content="Hệ thống Quản trị Hiệu suất và Vận hành Giáo viên Quản nhiệm Nội trú (BOPS)" />
+    <meta property="og:title" content="Quản trị Hiệu suất Công tác Nội trú" />
+    <meta property="og:description" content="Hệ thống Quản trị Hiệu suất và Vận hành Giáo viên Quản nhiệm Nội trú (BOPS)" />
+    <script>
+      (function() {
+        try {
+          var originalFetch = window.fetch;
+          var _fetch = originalFetch;
+          Object.defineProperty(window, 'fetch', {
+            get: function() { return _fetch; },
+            set: function(val) { _fetch = val; },
+            configurable: true,
+            enumerable: true
+          });
+        } catch (e) {
+          // ignore
+        }
+      })();
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
+
