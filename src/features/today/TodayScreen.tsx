@@ -173,10 +173,10 @@ export const TodayScreen: React.FC<TodayScreenProps> = ({ setActiveModule }) => 
               Timeline Công việc Ca trực ({todayDateStr})
             </h3>
             <button
-              onClick={() => setActiveModule('tasks')}
+              onClick={() => setActiveModule('operations')}
               className="text-xs font-semibold text-blue-600 hover:underline dark:text-blue-400 flex items-center gap-1"
             >
-              Xem tất cả Task <ChevronRight className="h-3.5 w-3.5" />
+              Trung tâm Vận hành <ChevronRight className="h-3.5 w-3.5" />
             </button>
           </div>
 

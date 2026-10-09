@@ -21,6 +21,7 @@ import {
   Check,
   Star,
   Users,
+  Info,
 } from 'lucide-react';
 import { BOPSStore, subscribeToStore } from '../../services/storage';
 import { KPIRecord, User, DailyEvaluation } from '../../types';
@@ -31,6 +32,8 @@ export const KPICenter: React.FC = () => {
   const [allUsers, setAllUsers] = useState<User[]>(BOPSStore.getUsers());
   const [kpis, setKPIs] = useState<KPIRecord[]>([]);
   const [dailyEvaluations, setDailyEvaluations] = useState<DailyEvaluation[]>([]);
+
+  // Timeframe State: Hằng Ngày (day), Hằng Tuần (week), Hằng Tháng (month)
   const [timeframe, setTimeframe] = useState<'day' | 'week' | 'month'>('day');
 
   // Selected date for viewing / evaluation
@@ -73,12 +76,190 @@ export const KPICenter: React.FC = () => {
   }, []);
 
   const teachers = allUsers.filter((u) => u.role === 'teacher');
-  const sortedKPIs = [...kpis].sort((a, b) => b.totalScore - a.totalScore);
 
-  // Find evaluations for selectedDate
+  // Helper to determine week bounds (Monday - Sunday) of selectedDate
+  const getWeekRange = (dateStr: string) => {
+    const d = new Date(dateStr);
+    const day = d.getDay(); // 0 is Sunday, 1 is Monday
+    const diffToMonday = day === 0 ? -6 : 1 - day;
+    const monday = new Date(d);
+    monday.setDate(d.getDate() + diffToMonday);
+    const sunday = new Date(monday);
+    sunday.setDate(monday.getDate() + 6);
+
+    const monStr = monday.toISOString().split('T')[0];
+    const sunStr = sunday.toISOString().split('T')[0];
+    return { monStr, sunStr };
+  };
+
+  const { monStr, sunStr } = getWeekRange(selectedDate);
+  const currentMonthPrefix = selectedDate.substring(0, 7); // 'YYYY-MM'
+
+  // Dynamic ranking calculation based on timeframe: 'day' | 'week' | 'month'
+  const rankedTeachers = teachers.map((teacher) => {
+    const teacherEvals = dailyEvaluations.filter((e) => e.teacherId === teacher.id);
+    const teacherInteractions = BOPSStore.getInteractions().filter((i) => i.teacherId === teacher.id);
+    const fallbackKpi = kpis.find((k) => k.teacherId === teacher.id);
+
+    if (timeframe === 'day') {
+      const evalToday = teacherEvals.find((e) => e.date === selectedDate);
+      if (evalToday) {
+        return {
+          teacher,
+          operationScore: evalToday.operationScore,
+          qualityScore: evalToday.qualityScore,
+          studentCareScore: evalToday.studentCareScore,
+          contributionScore: evalToday.contributionScore,
+          disciplineScore: evalToday.disciplineScore,
+          totalScore: evalToday.totalScore,
+          rank: evalToday.rank,
+          evaluatedShiftsCount: 1,
+          isEvaluated: true,
+          generalComment: evalToday.generalComment,
+          strengths: evalToday.strengths,
+          improvements: evalToday.improvements,
+          evaluatedAt: evalToday.evaluatedAt,
+        };
+      }
+      return {
+        teacher,
+        operationScore: fallbackKpi?.operationScore || 0,
+        qualityScore: fallbackKpi?.qualityScore || 0,
+        studentCareScore: fallbackKpi?.studentCareScore || 0,
+        contributionScore: fallbackKpi?.contributionScore || 0,
+        disciplineScore: fallbackKpi?.disciplineScore || 0,
+        totalScore: fallbackKpi?.totalScore || 0,
+        rank: (fallbackKpi?.rank || 'B') as 'A+' | 'A' | 'B' | 'C' | 'D',
+        evaluatedShiftsCount: 0,
+        isEvaluated: false,
+        generalComment: 'Chưa có thẩm định trong ngày này từ Quản lý.',
+        strengths: '',
+        improvements: '',
+        evaluatedAt: null,
+      };
+    }
+
+    if (timeframe === 'week') {
+      const evalsInWeek = teacherEvals.filter((e) => e.date >= monStr && e.date <= sunStr);
+      // Student care weekly condition: >= 1 HS interaction => 15đ, 0 HS => 0đ
+      const weeklyCareScore = teacherInteractions.length >= 1 ? 15 : 0;
+
+      if (evalsInWeek.length > 0) {
+        const count = evalsInWeek.length;
+        const avgOp = Math.round(evalsInWeek.reduce((s, e) => s + e.operationScore, 0) / count);
+        const avgQ = Math.round(evalsInWeek.reduce((s, e) => s + e.qualityScore, 0) / count);
+        const avgCont = Math.round(evalsInWeek.reduce((s, e) => s + e.contributionScore, 0) / count);
+        const avgDisc = Math.round(evalsInWeek.reduce((s, e) => s + e.disciplineScore, 0) / count);
+        const total = Math.max(0, Math.min(100, avgOp + avgQ + weeklyCareScore + avgCont + avgDisc));
+
+        let r: 'A+' | 'A' | 'B' | 'C' | 'D' = 'B';
+        if (total >= 97 && avgDisc === 5) r = 'A+';
+        else if (total >= 90) r = 'A';
+        else if (total >= 80) r = 'B';
+        else if (total >= 70) r = 'C';
+        else r = 'D';
+
+        return {
+          teacher,
+          operationScore: avgOp,
+          qualityScore: avgQ,
+          studentCareScore: weeklyCareScore,
+          contributionScore: avgCont,
+          disciplineScore: avgDisc,
+          totalScore: total,
+          rank: r,
+          evaluatedShiftsCount: count,
+          isEvaluated: true,
+          generalComment: `Tổng kết tuần (${monStr} đến ${sunStr}): Đã thẩm định ${count} ca trực.`,
+          strengths: 'Duy trì nền nếp ca trực và chăm sóc học sinh nội trú toàn trường.',
+          improvements: '',
+          evaluatedAt: evalsInWeek[0].evaluatedAt,
+        };
+      }
+      return {
+        teacher,
+        operationScore: fallbackKpi?.operationScore || 45,
+        qualityScore: fallbackKpi?.qualityScore || 18,
+        studentCareScore: weeklyCareScore,
+        contributionScore: fallbackKpi?.contributionScore || 9,
+        disciplineScore: fallbackKpi?.disciplineScore || 5,
+        totalScore: Math.max(0, Math.min(100, (fallbackKpi?.operationScore || 45) + (fallbackKpi?.qualityScore || 18) + weeklyCareScore + 9 + 5)),
+        rank: (fallbackKpi?.rank || 'B') as 'A+' | 'A' | 'B' | 'C' | 'D',
+        evaluatedShiftsCount: 0,
+        isEvaluated: false,
+        generalComment: 'Đang chờ thẩm định các ca trực trong tuần này.',
+        strengths: '',
+        improvements: '',
+        evaluatedAt: null,
+      };
+    }
+
+    // timeframe === 'month'
+    const evalsInMonth = teacherEvals.filter((e) => e.date.startsWith(currentMonthPrefix));
+    if (evalsInMonth.length > 0) {
+      const count = evalsInMonth.length;
+      const avgOp = Math.round(evalsInMonth.reduce((s, e) => s + e.operationScore, 0) / count);
+      const avgQ = Math.round(evalsInMonth.reduce((s, e) => s + e.qualityScore, 0) / count);
+      const avgCare = Math.round(evalsInMonth.reduce((s, e) => s + e.studentCareScore, 0) / count);
+      const avgCont = Math.round(evalsInMonth.reduce((s, e) => s + e.contributionScore, 0) / count);
+      const avgDisc = Math.round(evalsInMonth.reduce((s, e) => s + e.disciplineScore, 0) / count);
+      const total = Math.max(0, Math.min(100, avgOp + avgQ + avgCare + avgCont + avgDisc));
+
+      let r: 'A+' | 'A' | 'B' | 'C' | 'D' = 'B';
+      if (total >= 97 && avgDisc === 5) r = 'A+';
+      else if (total >= 90) r = 'A';
+      else if (total >= 80) r = 'B';
+      else if (total >= 70) r = 'C';
+      else r = 'D';
+
+      return {
+        teacher,
+        operationScore: avgOp,
+        qualityScore: avgQ,
+        studentCareScore: avgCare,
+        contributionScore: avgCont,
+        disciplineScore: avgDisc,
+        totalScore: total,
+        rank: r,
+        evaluatedShiftsCount: count,
+        isEvaluated: true,
+        generalComment: `Tổng kết tháng ${currentMonthPrefix}: Đã thẩm định ${count} ca trực.`,
+        strengths: 'Hoàn thành khối lượng công việc quản nhiệm tháng.',
+        improvements: '',
+        evaluatedAt: evalsInMonth[0].evaluatedAt,
+      };
+    }
+
+    return {
+      teacher,
+      operationScore: fallbackKpi?.operationScore || 45,
+      qualityScore: fallbackKpi?.qualityScore || 18,
+      studentCareScore: fallbackKpi?.studentCareScore || 14,
+      contributionScore: fallbackKpi?.contributionScore || 9,
+      disciplineScore: fallbackKpi?.disciplineScore || 5,
+      totalScore: fallbackKpi?.totalScore || 85,
+      rank: (fallbackKpi?.rank || 'B') as 'A+' | 'A' | 'B' | 'C' | 'D',
+      evaluatedShiftsCount: 0,
+      isEvaluated: false,
+      generalComment: 'Đang cập nhật đánh giá tháng từ hệ thống.',
+      strengths: '',
+      improvements: '',
+      evaluatedAt: null,
+    };
+  });
+
+  // Sort descending by totalScore
+  const sortedRankedTeachers = [...rankedTeachers].sort((a, b) => b.totalScore - a.totalScore);
+
+  // Current user's specific ranking & stats
+  const myCurrentRankItem = sortedRankedTeachers.find((item) => item.teacher.id === currentUser.id);
+  const myCurrentRankIndex = sortedRankedTeachers.findIndex((item) => item.teacher.id === currentUser.id);
+  const myEvaluationToday = dailyEvaluations.find(
+    (e) => e.teacherId === currentUser.id && e.date === selectedDate
+  );
+
+  // Status mapping for teachers on selectedDate (Manager View)
   const evalsForSelectedDate = dailyEvaluations.filter((e) => e.date === selectedDate);
-
-  // Status mapping for teachers on selectedDate
   const teachersWithEvalStatus = teachers.map((teacher) => {
     const existingEval = evalsForSelectedDate.find((e) => e.teacherId === teacher.id);
     const interactions = BOPSStore.getInteractions().filter((i) => i.teacherId === teacher.id);
@@ -93,7 +274,9 @@ export const KPICenter: React.FC = () => {
     };
   });
 
-  // Filter teachers
+  const evaluatedCount = teachersWithEvalStatus.filter((t) => t.isEvaluated).length;
+
+  // Filter teachers for manager view
   const filteredTeacherList = teachersWithEvalStatus.filter((item) => {
     const matchesSearch =
       item.teacher.fullName.toLowerCase().includes(searchTeacherQuery.toLowerCase()) ||
@@ -107,21 +290,15 @@ export const KPICenter: React.FC = () => {
     return true;
   });
 
-  const evaluatedCount = teachersWithEvalStatus.filter((t) => t.isEvaluated).length;
-  const pendingCount = teachers.length - evaluatedCount;
-  const avgScore =
-    evaluatedCount > 0
-      ? Math.round(
-          evalsForSelectedDate.reduce((sum, e) => sum + e.totalScore, 0) / evaluatedCount
-        )
-      : 0;
-
-  // Open modal for evaluating a teacher
+  // Open modal for evaluating a teacher (Admin)
   const handleOpenEvaluationModal = (teacher: User) => {
     setEvaluatingTeacher(teacher);
     const existing = dailyEvaluations.find(
       (e) => e.teacherId === teacher.id && e.date === selectedDate
     );
+
+    const interactions = BOPSStore.getInteractions().filter((i) => i.teacherId === teacher.id);
+    const carePts = interactions.length >= 1 ? 15 : 0;
 
     if (existing) {
       setEvalForm({
@@ -135,11 +312,10 @@ export const KPICenter: React.FC = () => {
         generalComment: existing.generalComment || '',
       });
     } else {
-      // Default standard good evaluation
       setEvalForm({
         operationScore: 48,
         qualityScore: 19,
-        studentCareScore: 14,
+        studentCareScore: carePts,
         contributionScore: 9,
         disciplineScore: 5,
         strengths: 'Chủ động bàn giao ca đúng giờ, quản lý trật tự KTX ổn định.',
@@ -149,14 +325,18 @@ export const KPICenter: React.FC = () => {
     }
   };
 
-  // Quick Preset Helper
   const applyPreset = (preset: 'excellent' | 'good' | 'average' | 'needs_improvement') => {
+    const teacherInteractions = evaluatingTeacher
+      ? BOPSStore.getInteractions().filter((i) => i.teacherId === evaluatingTeacher.id)
+      : [];
+    const carePts = teacherInteractions.length >= 1 ? 15 : 0;
+
     switch (preset) {
       case 'excellent':
         setEvalForm({
           operationScore: 50,
           qualityScore: 20,
-          studentCareScore: 15,
+          studentCareScore: carePts === 15 ? 15 : 12,
           contributionScore: 10,
           disciplineScore: 5,
           strengths: 'Hoàn thành xuất sắc mọi nhiệm vụ ca trực, nền nếp KTX tốt, tương tác hỗ trợ học sinh nhiệt tình.',
@@ -168,7 +348,7 @@ export const KPICenter: React.FC = () => {
         setEvalForm({
           operationScore: 48,
           qualityScore: 19,
-          studentCareScore: 14,
+          studentCareScore: carePts,
           contributionScore: 9,
           disciplineScore: 5,
           strengths: 'Bàn giao ca đúng giờ, kiểm tra vệ sinh phòng chu đáo, phối hợp tốt với tổ trực.',
@@ -180,7 +360,7 @@ export const KPICenter: React.FC = () => {
         setEvalForm({
           operationScore: 42,
           qualityScore: 17,
-          studentCareScore: 13,
+          studentCareScore: Math.min(12, carePts),
           contributionScore: 8,
           disciplineScore: 4,
           strengths: 'Có mặt đầy đủ trong ca trực, hỗ trợ điểm danh học sinh.',
@@ -192,7 +372,7 @@ export const KPICenter: React.FC = () => {
         setEvalForm({
           operationScore: 35,
           qualityScore: 14,
-          studentCareScore: 12,
+          studentCareScore: 10,
           contributionScore: 6,
           disciplineScore: 3,
           strengths: 'Đã hoàn thành bàn giao ca.',
@@ -203,7 +383,6 @@ export const KPICenter: React.FC = () => {
     }
   };
 
-  // Submit Evaluation
   const handleSubmitEvaluation = (e: React.FormEvent) => {
     e.preventDefault();
     if (!evaluatingTeacher) return;
@@ -240,22 +419,7 @@ export const KPICenter: React.FC = () => {
   else if (calculatedTotal >= 70) calculatedRank = 'C';
   else calculatedRank = 'D';
 
-  // For Teacher View: Current user's evaluation & KPI
-  const myEvaluationToday = dailyEvaluations.find(
-    (e) => e.teacherId === currentUser.id && e.date === selectedDate
-  );
-  const myRecentEvaluations = dailyEvaluations.filter((e) => e.teacherId === currentUser.id);
-  const myKPI = kpis.find((k) => k.teacherId === currentUser.id) || {
-    totalScore: 95,
-    rank: 'A',
-    operationScore: 48,
-    qualityScore: 19,
-    studentCareScore: 14,
-    contributionScore: 9,
-    disciplineScore: 5,
-    workloadIndex: 1.0,
-    interactionsCompletedThisWeek: 3,
-  };
+  const myInteractionsThisWeek = BOPSStore.getInteractions().filter((i) => i.teacherId === currentUser.id);
 
   return (
     <div className="space-y-6 pb-12">
@@ -264,25 +428,25 @@ export const KPICenter: React.FC = () => {
         <div>
           <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-amber-600 dark:text-amber-400">
             <Award className="h-4 w-4" />
-            <span>KPI & Daily Performance System • Độc quyền Quản lý Thẩm định</span>
+            <span>Hệ Thống Đánh Giá KPI & Xếp Hạng • Quản Trị Học Sinh Nội Trú Toàn Trường</span>
           </div>
           <h2 className="text-xl font-extrabold text-slate-900 dark:text-white mt-1">
             {isManager
-              ? 'Thẩm Định & Đánh Giá Công Việc Hằng Ngày'
-              : 'Hiệu Suất KPI & Đánh Giá Từ Quản Lý Thầy Lê Huy Phúc'}
+              ? 'Thẩm Định & Bảng Xếp Hạng KPI Giáo Viên Quản Nhiệm'
+              : 'Hiệu Suất KPI & Bảng Xếp Hạng Của Bạn'}
           </h2>
           <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
             {isManager
-              ? 'Tài khoản Quản lý Thầy Lê Huy Phúc là tài khoản duy nhất chấm điểm và đánh giá chất lượng ca trực của từng thầy/cô.'
-              : 'Toàn bộ công việc hằng ngày của Thầy/Cô được Quản lý Thầy Lê Huy Phúc trực tiếp thẩm định, đánh giá và đồng bộ KPI.'}
+              ? 'Điểm số được đồng bộ tự động từ Trung tâm Vận hành sau khi Admin kiểm tra thực tế & duyệt báo cáo hằng ngày.'
+              : 'Thầy/Cô xem trực tiếp điểm số của mình và theo dõi bảng xếp hạng thi đua hằng ngày, hằng tuần, hằng tháng toàn trường.'}
           </p>
         </div>
 
-        {/* Date Selector */}
+        {/* Date Selector & Today button */}
         <div className="flex items-center gap-2">
           <div className="flex items-center gap-1.5 rounded-2xl bg-white px-3 py-1.5 border border-slate-200 shadow-sm dark:bg-slate-800 dark:border-slate-700">
             <Calendar className="h-4 w-4 text-blue-600 dark:text-blue-400" />
-            <span className="text-xs font-semibold text-slate-700 dark:text-slate-300">Ngày:</span>
+            <span className="text-xs font-semibold text-slate-700 dark:text-slate-300">Ngày đối soát:</span>
             <input
               type="date"
               value={selectedDate}
@@ -293,10 +457,68 @@ export const KPICenter: React.FC = () => {
           {selectedDate !== todayStr && (
             <button
               onClick={() => setSelectedDate(todayStr)}
-              className="rounded-xl bg-blue-50 px-2.5 py-1.5 text-xs font-bold text-blue-700 hover:bg-blue-100 dark:bg-blue-950 dark:text-blue-300"
+              className="rounded-xl bg-blue-50 px-2.5 py-1.5 text-xs font-bold text-blue-700 hover:bg-blue-100 dark:bg-blue-950 dark:text-blue-300 transition"
             >
               Hôm nay
             </button>
+          )}
+        </div>
+      </div>
+
+      {/* ============================================================== */}
+      {/* TIMEFRAME SWITCHER BAR: HẰNG NGÀY / HẰNG TUẦN / HẰNG THÁNG      */}
+      {/* ============================================================== */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white p-3.5 rounded-3xl border border-slate-200 shadow-sm dark:bg-slate-900 dark:border-slate-800">
+        <div className="flex items-center gap-2">
+          <span className="text-xs font-extrabold text-slate-800 dark:text-slate-200">
+            Chu kỳ thống kê:
+          </span>
+          <div className="flex items-center rounded-2xl bg-slate-100 p-1 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs">
+            <button
+              onClick={() => setTimeframe('day')}
+              className={`flex items-center gap-1.5 rounded-xl px-3.5 py-1.5 font-bold transition ${
+                timeframe === 'day'
+                  ? 'bg-amber-600 text-white shadow-sm'
+                  : 'text-slate-600 hover:text-slate-900 dark:text-slate-300 dark:hover:text-white'
+              }`}
+            >
+              <Calendar className="h-3.5 w-3.5" />
+              <span>Hằng Ngày (Daily)</span>
+            </button>
+            <button
+              onClick={() => setTimeframe('week')}
+              className={`flex items-center gap-1.5 rounded-xl px-3.5 py-1.5 font-bold transition ${
+                timeframe === 'week'
+                  ? 'bg-amber-600 text-white shadow-sm'
+                  : 'text-slate-600 hover:text-slate-900 dark:text-slate-300 dark:hover:text-white'
+              }`}
+            >
+              <Clock className="h-3.5 w-3.5" />
+              <span>Hằng Tuần (Weekly)</span>
+            </button>
+            <button
+              onClick={() => setTimeframe('month')}
+              className={`flex items-center gap-1.5 rounded-xl px-3.5 py-1.5 font-bold transition ${
+                timeframe === 'month'
+                  ? 'bg-amber-600 text-white shadow-sm'
+                  : 'text-slate-600 hover:text-slate-900 dark:text-slate-300 dark:hover:text-white'
+              }`}
+            >
+              <TrendingUp className="h-3.5 w-3.5" />
+              <span>Hằng Tháng (Monthly)</span>
+            </button>
+          </div>
+        </div>
+
+        <div className="text-xs font-medium text-slate-500 dark:text-slate-400">
+          {timeframe === 'day' && (
+            <span>📅 Ngày đang xem: <strong className="text-slate-800 dark:text-white">{selectedDate}</strong></span>
+          )}
+          {timeframe === 'week' && (
+            <span>🗓️ Tuần hiện tại: <strong className="text-slate-800 dark:text-white">{monStr}</strong> đến <strong className="text-slate-800 dark:text-white">{sunStr}</strong></span>
+          )}
+          {timeframe === 'month' && (
+            <span>📊 Tháng hiện tại: <strong className="text-slate-800 dark:text-white">{currentMonthPrefix}</strong></span>
           )}
         </div>
       </div>
@@ -318,7 +540,7 @@ export const KPICenter: React.FC = () => {
                 }`}
               >
                 <UserCheck className="h-4 w-4" />
-                <span>Admin Đánh Giá Từng Thầy/Cô ({selectedDate})</span>
+                <span>Thẩm Định Theo Ngày ({selectedDate})</span>
                 <span className="rounded-full bg-blue-100 px-2 py-0.5 text-[10px] font-bold text-blue-700 dark:bg-blue-900/60 dark:text-blue-300">
                   {evaluatedCount} GV đã đánh giá
                 </span>
@@ -333,7 +555,7 @@ export const KPICenter: React.FC = () => {
                 }`}
               >
                 <Award className="h-4 w-4" />
-                <span>Bảng Xếp Hạng KPI Toàn Trường</span>
+                <span>Bảng Xếp Hạng ({timeframe === 'day' ? 'Ngày' : timeframe === 'week' ? 'Tuần' : 'Tháng'})</span>
               </button>
 
               <button
@@ -345,407 +567,260 @@ export const KPICenter: React.FC = () => {
                 }`}
               >
                 <FileText className="h-4 w-4" />
-                <span>Lịch Sử Đánh Giá Quản Lý ({dailyEvaluations.length})</span>
+                <span>Nhật Ký Đánh Giá ({dailyEvaluations.length})</span>
               </button>
-            </div>
-
-            {/* Manager identity badge */}
-            <div className="flex items-center gap-2 text-xs bg-amber-50 border border-amber-200 px-3 py-1.5 rounded-2xl text-amber-900 dark:bg-amber-950/40 dark:border-amber-900/60 dark:text-amber-200">
-              <ShieldCheck className="h-4 w-4 text-amber-600" />
-              <span>Người thẩm định: <strong>Thầy Lê Huy Phúc (Admin / Quản lý)</strong></span>
             </div>
           </div>
 
-          {/* TAB 1: DAILY EVALUATION BY ADMIN LÊ HUY PHÚC */}
+          {/* TAB 1: DAILY EVALUATION LIST */}
           {managerTab === 'daily_evaluation' && (
-            <div className="space-y-6">
-              {/* Daily Progress Stats */}
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-                <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-                  <div className="flex items-center justify-between text-slate-500">
-                    <span className="text-xs font-semibold">Phạm vi Đánh giá</span>
-                    <Users className="h-4 w-4 text-blue-500" />
-                  </div>
-                  <div className="mt-2 text-base font-extrabold text-slate-900 dark:text-white leading-tight">
-                    Giáo viên Quản nhiệm
-                  </div>
-                  <div className="text-[11px] text-slate-400 mt-1">Toàn bộ nhân sự KTX DomB</div>
-                </div>
-
-                <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-                  <div className="flex items-center justify-between text-slate-500">
-                    <span className="text-xs font-semibold">Đã Đánh Giá Ngày</span>
-                    <CheckCircle2 className="h-4 w-4 text-emerald-500" />
-                  </div>
-                  <div className="mt-2 text-2xl font-black text-emerald-600">
-                    {evaluatedCount}
-                  </div>
-                  <div className="text-[11px] text-slate-400">Đã lưu & đồng bộ KPI</div>
-                </div>
-
-                <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-                  <div className="flex items-center justify-between text-slate-500">
-                    <span className="text-xs font-semibold">Chưa Đánh Giá</span>
-                    <Clock className="h-4 w-4 text-amber-500" />
-                  </div>
-                  <div className="mt-2 text-2xl font-black text-amber-600">
-                    {pendingCount}
-                  </div>
-                  <div className="text-[11px] text-slate-400">Cần thẩm định hôm nay</div>
-                </div>
-
-                <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-                  <div className="flex items-center justify-between text-slate-500">
-                    <span className="text-xs font-semibold">Điểm TB Ngày</span>
-                    <Star className="h-4 w-4 text-purple-500" />
-                  </div>
-                  <div className="mt-2 text-2xl font-black text-purple-600">
-                    {avgScore > 0 ? `${avgScore} Đ` : 'Chưa có'}
-                  </div>
-                  <div className="text-[11px] text-slate-400">Thang điểm 100</div>
-                </div>
-              </div>
-
-              {/* Filters & Search */}
+            <div className="space-y-4">
+              {/* Search & Filter Controls */}
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                <div className="relative flex-1 max-w-md">
+                <div className="relative w-full sm:w-80">
                   <Search className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
                   <input
                     type="text"
                     value={searchTeacherQuery}
                     onChange={(e) => setSearchTeacherQuery(e.target.value)}
-                    placeholder="Tìm theo tên giáo viên, mã GV, tầng KTX..."
-                    className="w-full rounded-2xl border border-slate-200 bg-white py-2 pl-9 pr-4 text-xs shadow-sm focus:border-blue-500 focus:outline-none dark:border-slate-800 dark:bg-slate-900 dark:text-white"
+                    placeholder="Tìm theo tên giáo viên, mã GV..."
+                    className="w-full rounded-2xl border border-slate-200 bg-white pl-9 pr-4 py-2 text-xs text-slate-900 focus:border-blue-500 focus:outline-none dark:border-slate-700 dark:bg-slate-900 dark:text-white"
                   />
                 </div>
 
-                <div className="flex items-center gap-1.5 rounded-2xl bg-slate-100 p-1 dark:bg-slate-800">
-                  <button
-                    onClick={() => setFilterEvaluationStatus('all')}
-                    className={`rounded-xl px-3 py-1.5 text-xs font-bold transition ${
-                      filterEvaluationStatus === 'all'
-                        ? 'bg-white text-slate-900 shadow-sm dark:bg-slate-700 dark:text-white'
-                        : 'text-slate-500 hover:text-slate-900'
-                    }`}
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-semibold text-slate-500">Lọc trạng thái:</span>
+                  <select
+                    value={filterEvaluationStatus}
+                    onChange={(e) =>
+                      setFilterEvaluationStatus(e.target.value as 'all' | 'evaluated' | 'pending')
+                    }
+                    className="rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-bold text-slate-700 dark:border-slate-700 dark:bg-slate-900 dark:text-white"
                   >
-                    Tất cả ({teachers.length})
-                  </button>
-                  <button
-                    onClick={() => setFilterEvaluationStatus('pending')}
-                    className={`rounded-xl px-3 py-1.5 text-xs font-bold transition ${
-                      filterEvaluationStatus === 'pending'
-                        ? 'bg-amber-500 text-white shadow-sm'
-                        : 'text-slate-500 hover:text-slate-900'
-                    }`}
-                  >
-                    Chưa đánh giá ({pendingCount})
-                  </button>
-                  <button
-                    onClick={() => setFilterEvaluationStatus('evaluated')}
-                    className={`rounded-xl px-3 py-1.5 text-xs font-bold transition ${
-                      filterEvaluationStatus === 'evaluated'
-                        ? 'bg-emerald-600 text-white shadow-sm'
-                        : 'text-slate-500 hover:text-slate-900'
-                    }`}
-                  >
-                    Đã đánh giá ({evaluatedCount})
-                  </button>
+                    <option value="all">Tất cả ({teachers.length})</option>
+                    <option value="evaluated">Đã thẩm định ({evaluatedCount})</option>
+                    <option value="pending">Chờ thẩm định ({teachers.length - evaluatedCount})</option>
+                  </select>
                 </div>
               </div>
 
-              {/* Teacher Evaluation Cards Grid */}
+              {/* Teacher Cards Grid */}
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                {filteredTeacherList.map(({ teacher, evaluation, isEvaluated, interactionsCount, kpi }) => {
-                  return (
-                    <div
-                      key={teacher.id}
-                      className={`relative rounded-3xl border p-5 transition-all shadow-sm ${
-                        isEvaluated
-                          ? 'border-emerald-200 bg-white dark:border-emerald-950 dark:bg-slate-900'
-                          : 'border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900 hover:border-blue-400'
-                      }`}
-                    >
-                      {/* Teacher Header */}
-                      <div className="flex items-start justify-between gap-3">
-                        <div className="flex items-center gap-3">
-                          <img
-                            src={teacher.avatar}
-                            alt={teacher.fullName}
-                            className="h-11 w-11 rounded-2xl object-cover ring-2 ring-slate-100 dark:ring-slate-800"
-                          />
-                          <div>
-                            <div className="flex items-center gap-1.5">
-                              <h4 className="text-sm font-extrabold text-slate-900 dark:text-white">
-                                {teacher.fullName}
-                              </h4>
-                              <span className="rounded-md bg-slate-100 px-1.5 py-0.5 text-[10px] font-mono font-bold text-slate-600 dark:bg-slate-800 dark:text-slate-300">
-                                {teacher.teacherCode}
-                              </span>
-                            </div>
-                            <div className="text-[11px] text-slate-500 dark:text-slate-400">
-                              {teacher.position}
-                            </div>
+                {filteredTeacherList.map(({ teacher, evaluation, isEvaluated, interactionsCount }) => (
+                  <div
+                    key={teacher.id}
+                    className={`rounded-3xl border p-5 transition shadow-sm ${
+                      isEvaluated
+                        ? 'border-emerald-200 bg-emerald-50/20 dark:border-emerald-950 dark:bg-slate-900'
+                        : 'border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900'
+                    }`}
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="flex items-center gap-3">
+                        <img
+                          src={teacher.avatar}
+                          alt={teacher.fullName}
+                          className="h-10 w-10 rounded-full object-cover ring-2 ring-blue-500/20"
+                        />
+                        <div>
+                          <h4 className="font-extrabold text-slate-900 dark:text-white text-sm">
+                            {teacher.fullName}
+                          </h4>
+                          <div className="text-xs text-slate-500 font-mono">
+                            {teacher.teacherCode} • {teacher.buildingResponsible || 'Khối KTX'}
                           </div>
                         </div>
-
-                        {/* Status Badge */}
-                        {isEvaluated ? (
-                          <div className="text-right">
-                            <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2.5 py-1 text-[11px] font-black text-emerald-800 dark:bg-emerald-950/80 dark:text-emerald-300">
-                              <CheckCircle2 className="h-3.5 w-3.5" />
-                              {evaluation?.totalScore} Đ • Hạng {evaluation?.rank}
-                            </span>
-                          </div>
-                        ) : (
-                          <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2.5 py-1 text-[11px] font-bold text-amber-800 dark:bg-amber-950/80 dark:text-amber-300">
-                            <Clock className="h-3.5 w-3.5" />
-                            Chưa đánh giá
-                          </span>
-                        )}
                       </div>
 
-                      {/* Info preview */}
-                      <div className="mt-4 rounded-2xl bg-slate-50 p-3 text-xs dark:bg-slate-800/50 space-y-2">
-                        <div className="flex items-center justify-between text-slate-600 dark:text-slate-300">
-                          <span className="flex items-center gap-1.5">
-                            <MessageSquareHeart className="h-3.5 w-3.5 text-purple-500" />
-                            Tương tác 1-1 tuần này:
-                          </span>
-                          <span className="font-bold text-purple-600 dark:text-purple-400">
-                            {interactionsCount} lượt
-                          </span>
-                        </div>
-
-                        {isEvaluated && evaluation && (
-                          <>
-                            <div className="border-t border-slate-200/60 pt-2 dark:border-slate-700/60">
-                              <div className="grid grid-cols-5 text-center gap-1 text-[10px] font-semibold">
-                                <div className="bg-blue-50 text-blue-700 rounded p-1 dark:bg-blue-950/50 dark:text-blue-300">
-                                  VH: {evaluation.operationScore}
-                                </div>
-                                <div className="bg-emerald-50 text-emerald-700 rounded p-1 dark:bg-emerald-950/50 dark:text-emerald-300">
-                                  CL: {evaluation.qualityScore}
-                                </div>
-                                <div className="bg-purple-50 text-purple-700 rounded p-1 dark:bg-purple-950/50 dark:text-purple-300">
-                                  CS: {evaluation.studentCareScore}
-                                </div>
-                                <div className="bg-indigo-50 text-indigo-700 rounded p-1 dark:bg-indigo-950/50 dark:text-indigo-300">
-                                  ĐG: {evaluation.contributionScore}
-                                </div>
-                                <div className="bg-rose-50 text-rose-700 rounded p-1 dark:bg-rose-950/50 dark:text-rose-300">
-                                  KL: {evaluation.disciplineScore}
-                                </div>
-                              </div>
-                            </div>
-                            <div className="text-[11px] text-slate-600 italic line-clamp-2 dark:text-slate-300">
-                              "{evaluation.generalComment}"
-                            </div>
-                          </>
-                        )}
-                      </div>
-
-                      {/* Action Button */}
-                      <div className="mt-4 pt-3 border-t border-slate-100 flex items-center justify-between dark:border-slate-800">
-                        <span className="text-[10px] text-slate-400">
-                          {isEvaluated ? `Đã ký duyệt bởi Thầy Phúc` : `Chờ Thầy Phúc chấm điểm`}
+                      {isEvaluated ? (
+                        <span className="rounded-full bg-emerald-100 px-2.5 py-0.5 text-xs font-extrabold text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300">
+                          {evaluation?.totalScore} Đ • Hạng {evaluation?.rank}
                         </span>
-
-                        <button
-                          onClick={() => handleOpenEvaluationModal(teacher)}
-                          className={`flex items-center gap-1.5 rounded-xl px-3.5 py-1.5 text-xs font-bold transition shadow-sm ${
-                            isEvaluated
-                              ? 'bg-slate-100 text-slate-700 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-200'
-                              : 'bg-blue-600 text-white hover:bg-blue-700 shadow-blue-500/20'
-                          }`}
-                        >
-                          <Edit3 className="h-3.5 w-3.5" />
-                          <span>{isEvaluated ? 'Sửa đánh giá' : 'Chấm điểm ngay'}</span>
-                        </button>
-                      </div>
+                      ) : (
+                        <span className="rounded-full bg-amber-100 px-2.5 py-0.5 text-xs font-extrabold text-amber-800 dark:bg-amber-950 dark:text-amber-300">
+                          Chờ chấm
+                        </span>
+                      )}
                     </div>
-                  );
-                })}
+
+                    <div className="mt-4 space-y-2 border-t border-slate-100 pt-3 text-xs dark:border-slate-800">
+                      <div className="flex items-center justify-between text-slate-600 dark:text-slate-300">
+                        <span>Tương tác 1-1 tuần này:</span>
+                        <span className="font-bold text-purple-600">
+                          {interactionsCount} HS {interactionsCount >= 1 ? '✓ Đạt' : 'Chưa đạt'}
+                        </span>
+                      </div>
+
+                      {isEvaluated && evaluation && (
+                        <div className="rounded-2xl bg-slate-50 p-3 text-xs dark:bg-slate-800/60 space-y-1">
+                          <div className="text-[11px] font-bold text-slate-700 dark:text-slate-200">
+                            Nhận xét của Quản lý:
+                          </div>
+                          <div className="text-slate-600 dark:text-slate-300 italic text-[11px]">
+                            "{evaluation.generalComment}"
+                          </div>
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="mt-4 pt-3 border-t border-slate-100 dark:border-slate-800">
+                      <button
+                        onClick={() => handleOpenEvaluationModal(teacher)}
+                        className={`w-full rounded-xl py-2 text-xs font-bold transition flex items-center justify-center gap-1.5 shadow-sm ${
+                          isEvaluated
+                            ? 'bg-slate-100 text-slate-700 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-200'
+                            : 'bg-blue-600 text-white hover:bg-blue-700'
+                        }`}
+                      >
+                        <Edit3 className="h-3.5 w-3.5" />
+                        <span>{isEvaluated ? 'Chỉnh Sửa Đánh Giá' : 'Chấm Điểm Ca Trực'}</span>
+                      </button>
+                    </div>
+                  </div>
+                ))}
               </div>
             </div>
           )}
 
-          {/* TAB 2: OVERALL KPI RANKINGS */}
+          {/* TAB 2: RANKING TABLE (FOR MANAGER) */}
           {managerTab === 'ranking' && (
-            <div className="space-y-6">
-              {/* Rules Overview */}
-              <div className="grid grid-cols-2 md:grid-cols-5 gap-3 text-xs">
-                <div className="rounded-2xl border border-blue-200 bg-blue-50/50 p-3.5 dark:border-blue-900/40 dark:bg-slate-900">
-                  <div className="font-bold text-blue-900 dark:text-blue-300">A. Vận hành (Max 50)</div>
-                  <div className="text-lg font-black text-blue-700">50 Đ</div>
-                  <div className="text-[10px] text-slate-500 mt-1">Nhiệm vụ cốt lõi, điểm danh, kiểm tra</div>
-                </div>
-                <div className="rounded-2xl border border-emerald-200 bg-emerald-50/50 p-3.5 dark:border-emerald-900/40 dark:bg-slate-900">
-                  <div className="font-bold text-emerald-900 dark:text-emerald-300">B. Chất lượng (Max 20)</div>
-                  <div className="text-lg font-black text-emerald-700">20 Đ</div>
-                  <div className="text-[10px] text-slate-500 mt-1">Đúng giờ, vệ sinh phòng, bàn giao</div>
-                </div>
-                <div className="rounded-2xl border border-purple-200 bg-purple-50/50 p-3.5 dark:border-purple-900/40 dark:bg-slate-900">
-                  <div className="font-bold text-purple-900 dark:text-purple-300">C. Chăm sóc HS (Max 15)</div>
-                  <div className="text-lg font-black text-purple-700">15 Đ</div>
-                  <div className="text-[10px] text-slate-500 mt-1">Tối thiểu nhập 1 HS/tuần (Không nhập: 0đ)</div>
-                </div>
-                <div className="rounded-2xl border border-indigo-200 bg-indigo-50/50 p-3.5 dark:border-indigo-900/40 dark:bg-slate-900">
-                  <div className="font-bold text-indigo-900 dark:text-indigo-300">D. Đóng góp (Max 10)</div>
-                  <div className="text-lg font-black text-indigo-700">10 Đ</div>
-                  <div className="text-[10px] text-slate-500 mt-1">Sự kiện, trực thay, hỗ trợ bộ phận</div>
-                </div>
-                <div className="rounded-2xl border border-rose-200 bg-rose-50/50 p-3.5 dark:border-rose-900/40 dark:bg-slate-900">
-                  <div className="font-bold text-rose-900 dark:text-rose-300">E. Kỷ luật (Max 5)</div>
-                  <div className="text-lg font-black text-rose-700">5 Đ</div>
-                  <div className="text-[10px] text-slate-500 mt-1">Trừ điểm nếu đi muộn / bỏ vị trí</div>
-                </div>
+            <div className="space-y-4">
+              <div className="flex items-center justify-between">
+                <h3 className="font-extrabold text-slate-900 dark:text-white text-sm flex items-center gap-2">
+                  <Award className="h-4 w-4 text-amber-500" />
+                  <span>
+                    Bảng Xếp Hạng Thi Đua KPI Toàn Trường ({timeframe === 'day' ? 'Hằng Ngày' : timeframe === 'week' ? 'Hằng Tuần' : 'Hằng Tháng'})
+                  </span>
+                </h3>
+                <span className="text-xs text-slate-500">
+                  Tổng số: {sortedRankedTeachers.length} Giáo viên Quản nhiệm
+                </span>
               </div>
 
-              {/* KPI Table */}
               <div className="overflow-x-auto rounded-3xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900">
                 <table className="w-full text-left text-xs">
                   <thead className="border-b border-slate-100 bg-slate-50 font-bold uppercase text-slate-500 dark:border-slate-800 dark:bg-slate-800/50">
                     <tr>
                       <th className="p-4">Hạng</th>
                       <th className="p-4">Giáo viên</th>
-                      <th className="p-4">Vận hành (50)</th>
-                      <th className="p-4">Chất lượng (20)</th>
-                      <th className="p-4">Chăm sóc (15)</th>
-                      <th className="p-4">Đóng góp (10)</th>
-                      <th className="p-4">Kỷ luật (5)</th>
-                      <th className="p-4 text-center">Workload</th>
+                      <th className="p-4 text-center">Vận hành (50đ)</th>
+                      <th className="p-4 text-center">Chất lượng (20đ)</th>
+                      <th className="p-4 text-center">Chăm sóc 1-1 (15đ)</th>
+                      <th className="p-4 text-center">Đóng góp (10đ)</th>
+                      <th className="p-4 text-center">Kỷ luật (5đ)</th>
                       <th className="p-4 text-right">Tổng Điểm</th>
                       <th className="p-4 text-center">Xếp loại</th>
                       <th className="p-4 text-center">Thao tác</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                    {sortedKPIs.map((kpi, idx) => {
-                      const teacher = teachers.find((t) => t.id === kpi.teacherId);
-                      return (
-                        <tr
-                          key={kpi.id}
-                          className="hover:bg-slate-50/80 transition dark:hover:bg-slate-800/50"
-                        >
-                          <td className="p-4 font-black text-slate-900 dark:text-white">
-                            <span className="flex h-6 w-6 items-center justify-center rounded-full bg-blue-100 text-xs font-bold text-blue-700 dark:bg-blue-900 dark:text-blue-200">
-                              {idx + 1}
-                            </span>
-                          </td>
-                          <td className="p-4">
-                            <div className="font-bold text-slate-900 dark:text-white">
-                              {kpi.teacherName}
-                            </div>
-                            <div className="text-[10px] text-slate-400 font-mono">
-                              {kpi.teacherCode}
-                            </div>
-                          </td>
-                          <td className="p-4 font-semibold text-blue-600">{kpi.operationScore}</td>
-                          <td className="p-4 font-semibold text-emerald-600">{kpi.qualityScore}</td>
-                          <td className="p-4 font-semibold text-purple-600">{kpi.studentCareScore}</td>
-                          <td className="p-4 font-semibold text-indigo-600">{kpi.contributionScore}</td>
-                          <td className="p-4 font-semibold text-rose-600">{kpi.disciplineScore}</td>
-                          <td className="p-4 text-center font-bold text-slate-700 dark:text-slate-200">
-                            {kpi.workloadIndex}
-                          </td>
-                          <td className="p-4 text-right font-black text-base text-blue-600">
-                            {kpi.totalScore} Đ
-                          </td>
-                          <td className="p-4 text-center">
-                            <span
-                              className={`rounded-full px-3 py-1 text-xs font-extrabold ${
-                                kpi.rank === 'A+'
-                                  ? 'bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300 ring-2 ring-amber-400/40'
-                                  : kpi.rank === 'A'
-                                  ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300'
-                                  : 'bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-300'
-                              }`}
-                            >
-                              Hạng {kpi.rank}
-                            </span>
-                          </td>
-                          <td className="p-4 text-center">
-                            {teacher && (
-                              <button
-                                onClick={() => handleOpenEvaluationModal(teacher)}
-                                className="rounded-lg bg-blue-50 px-2.5 py-1 text-[11px] font-bold text-blue-700 hover:bg-blue-100 dark:bg-blue-950 dark:text-blue-300"
-                              >
-                                Đánh giá ngày
-                              </button>
-                            )}
-                          </td>
-                        </tr>
-                      );
-                    })}
+                    {sortedRankedTeachers.map((item, idx) => (
+                      <tr
+                        key={item.teacher.id}
+                        className="hover:bg-slate-50/80 transition dark:hover:bg-slate-800/50"
+                      >
+                        <td className="p-4 font-black text-slate-900 dark:text-white">
+                          <span
+                            className={`flex h-6 w-6 items-center justify-center rounded-full text-xs font-bold ${
+                              idx === 0
+                                ? 'bg-amber-500 text-white shadow-sm'
+                                : idx === 1
+                                ? 'bg-slate-300 text-slate-800'
+                                : idx === 2
+                                ? 'bg-amber-700 text-white'
+                                : 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300'
+                            }`}
+                          >
+                            {idx + 1}
+                          </span>
+                        </td>
+                        <td className="p-4">
+                          <div className="font-bold text-slate-900 dark:text-white">
+                            {item.teacher.fullName}
+                          </div>
+                          <div className="text-[10px] text-slate-400 font-mono">
+                            {item.teacher.teacherCode}
+                          </div>
+                        </td>
+                        <td className="p-4 text-center font-semibold text-blue-600">{item.operationScore}</td>
+                        <td className="p-4 text-center font-semibold text-emerald-600">{item.qualityScore}</td>
+                        <td className="p-4 text-center font-semibold text-purple-600">{item.studentCareScore}</td>
+                        <td className="p-4 text-center font-semibold text-indigo-600">{item.contributionScore}</td>
+                        <td className="p-4 text-center font-semibold text-rose-600">{item.disciplineScore}</td>
+                        <td className="p-4 text-right font-black text-base text-blue-600">
+                          {item.totalScore} Đ
+                        </td>
+                        <td className="p-4 text-center">
+                          <span
+                            className={`rounded-full px-3 py-1 text-xs font-extrabold ${
+                              item.rank === 'A+'
+                                ? 'bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300 ring-1 ring-amber-400/40'
+                                : item.rank === 'A'
+                                ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300'
+                                : 'bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-300'
+                            }`}
+                          >
+                            Hạng {item.rank}
+                          </span>
+                        </td>
+                        <td className="p-4 text-center">
+                          <button
+                            onClick={() => handleOpenEvaluationModal(item.teacher)}
+                            className="rounded-lg bg-blue-50 px-2.5 py-1 text-[11px] font-bold text-blue-700 hover:bg-blue-100 dark:bg-blue-950 dark:text-blue-300"
+                          >
+                            Chấm điểm
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
                   </tbody>
                 </table>
               </div>
             </div>
           )}
 
-          {/* TAB 3: EVALUATION HISTORY */}
+          {/* TAB 3: HISTORY */}
           {managerTab === 'history' && (
             <div className="space-y-4">
-              <h3 className="text-sm font-bold text-slate-800 dark:text-slate-100">
-                Toàn Bộ Nhật Ký Đánh Giá Của Quản Lý Thầy Lê Huy Phúc
-              </h3>
-              <div className="divide-y divide-slate-100 rounded-3xl border border-slate-200 bg-white shadow-sm dark:divide-slate-800 dark:border-slate-800 dark:bg-slate-900">
-                {dailyEvaluations.length === 0 ? (
-                  <div className="p-8 text-center text-xs text-slate-400">
-                    Chưa có lịch sử đánh giá nào.
-                  </div>
-                ) : (
-                  dailyEvaluations.map((ev) => (
-                    <div key={ev.id} className="p-4 flex flex-col md:flex-row md:items-center justify-between gap-4">
-                      <div className="space-y-1">
-                        <div className="flex items-center gap-2">
-                          <span className="font-bold text-slate-900 dark:text-white text-sm">
-                            {ev.teacherName} ({ev.teacherCode})
-                          </span>
-                          <span className="rounded-md bg-blue-100 px-2 py-0.5 text-[10px] font-bold text-blue-700 dark:bg-blue-950 dark:text-blue-300">
+              <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+                <h3 className="font-extrabold text-slate-900 dark:text-white text-sm mb-4">
+                  Lịch Sử Đánh Giá & Đồng Bộ KPI Toàn Trường
+                </h3>
+                <div className="space-y-3">
+                  {dailyEvaluations.map((ev) => (
+                    <div
+                      key={ev.id}
+                      className="p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200/80 dark:border-slate-700/60 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs"
+                    >
+                      <div>
+                        <div className="font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                          <span>{ev.teacherName}</span>
+                          <span className="font-mono text-slate-400">({ev.teacherCode})</span>
+                          <span className="rounded-md bg-blue-100 px-2 py-0.5 text-[10px] font-bold text-blue-800 dark:bg-blue-950 dark:text-blue-300">
                             Ngày {ev.date}
                           </span>
-                          <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-bold text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300">
-                            {ev.totalScore} Đ • Hạng {ev.rank}
-                          </span>
                         </div>
-                        <p className="text-xs text-slate-600 dark:text-slate-300">
-                          <strong>Nhận xét:</strong> {ev.generalComment}
+                        <p className="text-slate-600 dark:text-slate-300 mt-1 italic">
+                          "{ev.generalComment}"
                         </p>
-                        {ev.strengths && (
-                          <p className="text-[11px] text-emerald-600 dark:text-emerald-400">
-                            ✓ Ưu điểm: {ev.strengths}
-                          </p>
-                        )}
-                        {ev.improvements && (
-                          <p className="text-[11px] text-amber-600 dark:text-amber-400">
-                            ⚠️ Cần lưu ý: {ev.improvements}
-                          </p>
-                        )}
                       </div>
 
-                      <div className="flex items-center gap-2 shrink-0">
-                        <span className="text-[10px] text-slate-400">
-                          Thẩm định lúc: {new Date(ev.evaluatedAt).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })}
+                      <div className="flex items-center gap-3 shrink-0">
+                        <span className="font-black text-sm text-blue-600">{ev.totalScore} Đ</span>
+                        <span className="rounded-full bg-emerald-100 px-2 py-0.5 font-bold text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300">
+                          Hạng {ev.rank}
                         </span>
-                        <button
-                          onClick={() => BOPSStore.deleteDailyEvaluation(ev.id)}
-                          className="rounded-lg p-1.5 text-slate-400 hover:bg-rose-50 hover:text-rose-600 dark:hover:bg-rose-950/50 transition"
-                          title="Xóa đánh giá này"
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </button>
                       </div>
                     </div>
-                  ))
-                )}
+                  ))}
+                </div>
               </div>
             </div>
           )}
         </div>
       ) : (
         /* ============================================================== */
-        /* SECTION 2: TEACHER VIEW (Thầy/Cô Khác - CHỈ XEM HIỆU SUẤT)     */
+        /* SECTION 2: TEACHER VIEW (Giáo viên Quản nhiệm)                 */
         /* ============================================================== */
         <div className="space-y-6">
           {/* Informative Banner */}
@@ -756,50 +831,65 @@ export const KPICenter: React.FC = () => {
               </div>
               <div>
                 <h3 className="text-sm font-extrabold text-slate-900 dark:text-white">
-                  Quy Định Đánh Giá Hiệu Suất Công Việc Giáo Viên
+                  Đánh Giá Hiệu Suất KPI & Xếp Hạng Học Sinh Nội Trú Toàn Trường
                 </h3>
                 <p className="text-xs text-slate-600 dark:text-slate-300 mt-1 leading-relaxed">
-                  Tài khoản Quản trị của <strong>Thầy Lê Huy Phúc</strong> là tài khoản duy nhất trực tiếp thẩm định và đánh giá công việc hằng ngày của từng Thầy/Cô. Thầy/Cô được phân quyền nhập <strong>Tương tác 1-1 Học sinh</strong> và theo dõi bảng điểm KPI xếp hạng minh bạch dưới đây.
+                  Toàn bộ điểm số của Thầy/Cô được Quản lý <strong>Thầy Lê Huy Phúc</strong> trực tiếp thẩm định từ Trung tâm Vận hành. Thầy/Cô có thể theo dõi xếp hạng theo <strong>Hằng ngày, Hằng tuần hoặc Hằng tháng</strong> minh bạch dưới đây.
                 </p>
               </div>
             </div>
           </div>
 
-          {/* Personal KPI Summary Cards */}
+          {/* Personal KPI Summary Cards for Selected Timeframe */}
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
             <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-              <div className="text-xs font-semibold text-slate-500">Điểm KPI Tổng Thể</div>
-              <div className="mt-2 text-3xl font-black text-blue-600">{myKPI.totalScore}</div>
+              <div className="text-xs font-semibold text-slate-500">
+                Điểm KPI Của Bạn ({timeframe === 'day' ? 'Ngày' : timeframe === 'week' ? 'Tuần' : 'Tháng'})
+              </div>
+              <div className="mt-2 text-3xl font-black text-blue-600">
+                {myCurrentRankItem?.totalScore || 0}
+                <span className="text-xs font-normal text-slate-400"> / 100 Đ</span>
+              </div>
               <div className="mt-1 text-[11px] font-bold text-emerald-600">
-                Xếp loại: Hạng {myKPI.rank}
+                Xếp loại: Hạng {myCurrentRankItem?.rank || 'B'}
               </div>
             </div>
 
             <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
               <div className="text-xs font-semibold text-slate-500">Tương tác 1-1 Tuần Này</div>
               <div className="mt-2 text-3xl font-black text-purple-600">
-                {myKPI.interactionsCompletedThisWeek}
-                <span className="text-xs font-normal text-slate-400"> / 3 lượt</span>
+                {myInteractionsThisWeek.length}
+                <span className="text-xs font-normal text-slate-400"> / 1 HS</span>
               </div>
-              <div className="mt-1 text-[11px] text-purple-600">
-                {myKPI.interactionsCompletedThisWeek >= 3 ? '✓ Đạt chỉ tiêu tuần' : 'Cần bổ sung thêm'}
+              <div className="mt-1 text-[11px] font-bold">
+                {myInteractionsThisWeek.length >= 1 ? (
+                  <span className="text-emerald-600">✓ Đạt 15đ trọng số (Mục C)</span>
+                ) : (
+                  <span className="text-rose-600">⏳ Chưa đạt (0đ trọng số)</span>
+                )}
               </div>
             </div>
 
             <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-              <div className="text-xs font-semibold text-slate-500">Thứ Hạng Bộ Phận</div>
-              <div className="mt-2 text-3xl font-black text-slate-900 dark:text-white">
-                #{sortedKPIs.findIndex((k) => k.teacherId === currentUser.id) + 1}
+              <div className="text-xs font-semibold text-slate-500">
+                Thứ Hạng ({timeframe === 'day' ? 'Ngày' : timeframe === 'week' ? 'Tuần' : 'Tháng'})
               </div>
-              <div className="mt-1 text-[11px] text-slate-400">Bảng xếp hạng toàn trường</div>
+              <div className="mt-2 text-3xl font-black text-amber-600">
+                #{myCurrentRankIndex >= 0 ? myCurrentRankIndex + 1 : '-'}
+                <span className="text-xs font-normal text-slate-400"> / {teachers.length} GV</span>
+              </div>
+              <div className="mt-1 text-[11px] text-slate-400">Bảng thi đua toàn trường</div>
             </div>
 
             <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-              <div className="text-xs font-semibold text-slate-500">Workload Index</div>
+              <div className="text-xs font-semibold text-slate-500">Ca Trực Đã Thẩm Định</div>
               <div className="mt-2 text-3xl font-black text-slate-800 dark:text-slate-100">
-                {myKPI.workloadIndex}
+                {myCurrentRankItem?.evaluatedShiftsCount || 0}
+                <span className="text-xs font-normal text-slate-400"> ca</span>
               </div>
-              <div className="mt-1 text-[11px] text-slate-400">Hệ số định mức ca</div>
+              <div className="mt-1 text-[11px] text-slate-400">
+                {timeframe === 'day' ? 'Trong ngày' : timeframe === 'week' ? 'Trong tuần' : 'Trong tháng'}
+              </div>
             </div>
           </div>
 
@@ -816,7 +906,7 @@ export const KPICenter: React.FC = () => {
                   </h3>
                 </div>
                 <p className="text-xs text-slate-500 mt-0.5">
-                  Thẩm định chất lượng ca trực, kỷ luật & chăm sóc học sinh
+                  Thẩm định ca trực, kỷ luật & chăm sóc học sinh nội trú toàn trường
                 </p>
               </div>
 
@@ -894,8 +984,10 @@ export const KPICenter: React.FC = () => {
                   )}
 
                   <div className="pt-2 text-[10px] text-slate-400 border-t border-slate-200 dark:border-slate-700 flex items-center justify-between">
-                    <span>Người thẩm định: Thầy Lê Huy Phúc • Trưởng Bộ phận Nội trú</span>
-                    <span>Ký duyệt: {new Date(myEvaluationToday.evaluatedAt).toLocaleString('vi-VN')}</span>
+                    <span>Người thẩm định: Thầy Lê Huy Phúc • Trưởng Bộ phận Quản nhiệm</span>
+                    <span>
+                      Ký duyệt: {myEvaluationToday.evaluatedAt ? new Date(myEvaluationToday.evaluatedAt).toLocaleString('vi-VN') : 'Đã duyệt'}
+                    </span>
                   </div>
                 </div>
               </div>
@@ -906,43 +998,50 @@ export const KPICenter: React.FC = () => {
                   Chưa Có Đánh Giá Cho Ngày {selectedDate}
                 </h4>
                 <p className="text-xs text-slate-500 mt-1 max-w-md mx-auto">
-                  Quản lý Thầy Lê Huy Phúc sẽ tiến hành thẩm định và chấm điểm công việc sau khi kết thúc ca trực hoặc tổng kết cuối ngày.
+                  Quản lý Thầy Lê Huy Phúc sẽ tiến hành thẩm định và chấm điểm công việc từ Trung tâm Vận hành sau khi kết thúc ca trực hoặc sau khi kiểm tra thực tế & duyệt báo cáo ngày.
                 </p>
               </div>
             )}
           </div>
 
-          {/* Section: Bảng Xếp Hạng Toàn Bộ Phận */}
+          {/* Section: Bảng Xếp Hạng Thi Đua Hằng Ngày / Tuần / Tháng */}
           <div className="space-y-4">
-            <h3 className="text-base font-extrabold text-slate-900 dark:text-white flex items-center gap-2">
-              <Award className="h-5 w-5 text-amber-500" />
-              Bảng Xếp Hạng Thi Đua KPI Toàn Trường
-            </h3>
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+              <h3 className="text-base font-extrabold text-slate-900 dark:text-white flex items-center gap-2">
+                <Award className="h-5 w-5 text-amber-500" />
+                <span>
+                  Bảng Xếp Hạng Thi Đua KPI ({timeframe === 'day' ? 'Hằng Ngày' : timeframe === 'week' ? 'Hằng Tuần' : 'Hằng Tháng'}) Toàn Trường
+                </span>
+              </h3>
+              <span className="text-xs text-slate-500">
+                Thứ hạng của bạn: <strong className="text-blue-600">#{myCurrentRankIndex >= 0 ? myCurrentRankIndex + 1 : '-'}</strong> / {teachers.length} GV
+              </span>
+            </div>
 
             <div className="overflow-x-auto rounded-3xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900">
               <table className="w-full text-left text-xs">
                 <thead className="border-b border-slate-100 bg-slate-50 font-bold uppercase text-slate-500 dark:border-slate-800 dark:bg-slate-800/50">
                   <tr>
                     <th className="p-4">Hạng</th>
-                    <th className="p-4">Giáo viên</th>
-                    <th className="p-4">Vận hành</th>
-                    <th className="p-4">Chất lượng</th>
-                    <th className="p-4">Chăm sóc</th>
-                    <th className="p-4">Đóng góp</th>
-                    <th className="p-4">Kỷ luật</th>
+                    <th className="p-4">Giáo viên Quản nhiệm</th>
+                    <th className="p-4 text-center">Vận hành (50đ)</th>
+                    <th className="p-4 text-center">Chất lượng (20đ)</th>
+                    <th className="p-4 text-center">Chăm sóc 1-1 (15đ)</th>
+                    <th className="p-4 text-center">Đóng góp (10đ)</th>
+                    <th className="p-4 text-center">Kỷ luật (5đ)</th>
                     <th className="p-4 text-right">Tổng Điểm</th>
                     <th className="p-4 text-center">Xếp loại</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                  {sortedKPIs.map((kpi, idx) => {
-                    const isMe = kpi.teacherId === currentUser.id;
+                  {sortedRankedTeachers.map((item, idx) => {
+                    const isMe = item.teacher.id === currentUser.id;
                     return (
                       <tr
-                        key={kpi.id}
+                        key={item.teacher.id}
                         className={`transition ${
                           isMe
-                            ? 'bg-blue-50/70 font-semibold dark:bg-blue-950/40 ring-1 ring-blue-500/30'
+                            ? 'bg-blue-50/80 font-bold dark:bg-blue-950/50 ring-2 ring-blue-500/40'
                             : 'hover:bg-slate-50/60 dark:hover:bg-slate-800/40'
                         }`}
                       >
@@ -950,7 +1049,13 @@ export const KPICenter: React.FC = () => {
                           <span
                             className={`flex h-6 w-6 items-center justify-center rounded-full text-xs font-bold ${
                               isMe
-                                ? 'bg-blue-600 text-white'
+                                ? 'bg-blue-600 text-white shadow-md'
+                                : idx === 0
+                                ? 'bg-amber-500 text-white'
+                                : idx === 1
+                                ? 'bg-slate-300 text-slate-800'
+                                : idx === 2
+                                ? 'bg-amber-700 text-white'
                                 : 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300'
                             }`}
                           >
@@ -959,36 +1064,36 @@ export const KPICenter: React.FC = () => {
                         </td>
                         <td className="p-4">
                           <div className="font-bold text-slate-900 dark:text-white flex items-center gap-1.5">
-                            {kpi.teacherName}
+                            <span>{item.teacher.fullName}</span>
                             {isMe && (
-                              <span className="rounded bg-blue-600 px-1.5 py-0.5 text-[9px] font-bold text-white uppercase">
+                              <span className="rounded bg-blue-600 px-1.5 py-0.5 text-[9px] font-black text-white uppercase shadow-sm">
                                 Bạn
                               </span>
                             )}
                           </div>
                           <div className="text-[10px] text-slate-400 font-mono">
-                            {kpi.teacherCode}
+                            {item.teacher.teacherCode} • {item.teacher.buildingResponsible || 'Khối KTX'}
                           </div>
                         </td>
-                        <td className="p-4 text-blue-600 font-semibold">{kpi.operationScore}</td>
-                        <td className="p-4 text-emerald-600 font-semibold">{kpi.qualityScore}</td>
-                        <td className="p-4 text-purple-600 font-semibold">{kpi.studentCareScore}</td>
-                        <td className="p-4 text-indigo-600 font-semibold">{kpi.contributionScore}</td>
-                        <td className="p-4 text-rose-600 font-semibold">{kpi.disciplineScore}</td>
+                        <td className="p-4 text-center text-blue-600 font-semibold">{item.operationScore}</td>
+                        <td className="p-4 text-center text-emerald-600 font-semibold">{item.qualityScore}</td>
+                        <td className="p-4 text-center text-purple-600 font-semibold">{item.studentCareScore}</td>
+                        <td className="p-4 text-center text-indigo-600 font-semibold">{item.contributionScore}</td>
+                        <td className="p-4 text-center text-rose-600 font-semibold">{item.disciplineScore}</td>
                         <td className="p-4 text-right font-black text-sm text-blue-600">
-                          {kpi.totalScore} Đ
+                          {item.totalScore} Đ
                         </td>
                         <td className="p-4 text-center">
                           <span
                             className={`rounded-full px-2.5 py-0.5 text-[11px] font-extrabold ${
-                              kpi.rank === 'A+'
-                                ? 'bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300'
-                                : kpi.rank === 'A'
+                              item.rank === 'A+'
+                                ? 'bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300 ring-1 ring-amber-400/40'
+                                : item.rank === 'A'
                                 ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300'
                                 : 'bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-300'
                             }`}
                           >
-                            Hạng {kpi.rank}
+                            Hạng {item.rank}
                           </span>
                         </td>
                       </tr>
@@ -1152,6 +1257,9 @@ export const KPICenter: React.FC = () => {
                   }
                   className="w-full accent-purple-600"
                 />
+                <div className="text-[10px] text-slate-500 mt-1">
+                  Chỉ tiêu: Tuần tối thiểu 1 HS tương tác 1-1 = Đạt 15đ (Không nhập: 0đ)
+                </div>
               </div>
 
               {/* 4. Contribution Score (Max 10) */}

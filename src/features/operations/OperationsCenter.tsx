@@ -60,7 +60,7 @@ const KPI_CATEGORIES: KPICategoryDefinition[] = [
     iconText: '⏰',
     color: 'blue',
     presetViolations: [
-      { label: 'Bỏ sót kiểm diện giờ ăn / giờ ngủ KTX', penalty: 10 },
+      { label: 'Quên điểm danh', penalty: 10 },
       { label: 'Đi muộn ca trực / Bàn giao ca trễ', penalty: 5 },
       { label: 'Không tuần tra an ninh hành lang KTX đủ lượt', penalty: 5 },
       { label: 'Bàn giao ca trực sơ sài, thiếu thông tin', penalty: 5 },
@@ -230,7 +230,16 @@ export const OperationsCenter: React.FC<OperationsCenterProps> = ({ setActiveMod
       });
     }
 
-    showToast(`✅ Đã xác nhận HOÀN THÀNH (100đ - A+) cho Thầy/Cô ${teacher.fullName}!`);
+    // Gửi thông báo trực tiếp đến giáo viên
+    BOPSStore.addNotification({
+      receiverId: teacher.id,
+      title: `Đánh giá ca trực ngày ${selectedDate} • Hoàn thành 100đ (Hạng A+)`,
+      content: `Quản lý Thầy Lê Huy Phúc đã thẩm định ca trực ngày ${selectedDate} của Thầy/Cô: Hoàn thành tốt 100% nhiệm vụ. Điểm KPI đã được tự động đồng bộ sang mục Đánh giá KPI & Xếp hạng.`,
+      type: 'kpi',
+      priority: 'medium',
+    });
+
+    showToast(`✅ Đã xác nhận HOÀN THÀNH (100đ - A+) & gửi thông báo đến Thầy/Cô ${teacher.fullName}!`);
   };
 
   // =========================================================================
@@ -251,9 +260,17 @@ export const OperationsCenter: React.FC<OperationsCenterProps> = ({ setActiveMod
         generalComment: `Quản lý Thầy Lê Huy Phúc duyệt hàng loạt: Hoàn thành tốt 100% nhiệm vụ ca trực ngày ${selectedDate}.`,
         strengths: 'Đảm bảo nghiêm túc kỷ luật và chăm sóc học sinh.',
       });
+
+      BOPSStore.addNotification({
+        receiverId: t.id,
+        title: `Đánh giá ca trực ngày ${selectedDate} • Hoàn thành 100đ (Hạng A+)`,
+        content: `Quản lý Thầy Lê Huy Phúc đã duyệt hoàn thành nhiệm vụ ca trực ngày ${selectedDate}. Điểm KPI: 100đ (Hạng A+).`,
+        type: 'kpi',
+        priority: 'medium',
+      });
     });
 
-    showToast(`🎉 Đã duyệt HOÀN THÀNH TẤT CẢ cho toàn bộ ${teachers.length} GVQN ngày ${selectedDate}!`);
+    showToast(`🎉 Đã duyệt HOÀN THÀNH TẤT CẢ & gửi thông báo đến toàn bộ ${teachers.length} GVQN ngày ${selectedDate}!`);
   };
 
   // =========================================================================
@@ -368,7 +385,24 @@ export const OperationsCenter: React.FC<OperationsCenterProps> = ({ setActiveMod
       });
     }
 
-    showToast(`⚠️ Đã ghi nhận CHƯA HOÀN THÀNH cho Thầy/Cô ${evaluatingTeacher.fullName} (Trừ ${totalDeducted}đ KPI)!`);
+    // Gửi thông báo trực tiếp đến giáo viên
+    const finalScore = opScore + qScore + careScore + contScore + discScore;
+    let finalRank = 'B';
+    if (finalScore >= 97 && discScore === 5) finalRank = 'A+';
+    else if (finalScore >= 90) finalRank = 'A';
+    else if (finalScore >= 80) finalRank = 'B';
+    else if (finalScore >= 70) finalRank = 'C';
+    else finalRank = 'D';
+
+    BOPSStore.addNotification({
+      receiverId: evaluatingTeacher.id,
+      title: `Đánh giá ca trực ngày ${selectedDate} • Chưa hoàn thành (-${totalDeducted}đ)`,
+      content: `Quản lý Thầy Lê Huy Phúc ghi nhận: ${comment}. Điểm KPI của Thầy/Cô: ${finalScore}/100đ (Xếp hạng ${finalRank}). Yêu cầu: "${improvements.trim() || 'Rút kinh nghiệm và chấn chỉnh trong ca trực tiếp theo'}"`,
+      type: 'kpi',
+      priority: 'high',
+    });
+
+    showToast(`⚠️ Đã ghi nhận CHƯA HOÀN THÀNH (-${totalDeducted}đ) & gửi thông báo đến Thầy/Cô ${evaluatingTeacher.fullName}!`);
     setEvaluatingTeacher(null);
   };
 
@@ -1007,7 +1041,7 @@ export const OperationsCenter: React.FC<OperationsCenterProps> = ({ setActiveMod
               <textarea
                 rows={3}
                 required
-                placeholder="Nhập cụ thể sự việc chưa hoàn thành (Ví dụ: Thầy Thắng quên kiểm diện ăn trưa học sinh phòng 102; học sinh tầng 2 làm ồn sau 22h30 chưa được chấn chỉnh...)"
+                placeholder="Nhập cụ thể sự việc chưa hoàn thành (Ví dụ: Thầy Thắng quên điểm danh học sinh phòng 102; học sinh tầng 2 làm ồn sau 22h30 chưa được chấn chỉnh...)"
                 value={customComment}
                 onChange={(e) => setCustomComment(e.target.value)}
                 className="w-full rounded-2xl border border-slate-200 bg-white p-3 text-xs focus:border-rose-500 focus:outline-none dark:border-slate-700 dark:bg-slate-900 dark:text-white"

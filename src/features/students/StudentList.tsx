@@ -36,6 +36,7 @@ import { BOPSStore, subscribeToStore } from '../../services/storage';
 import { Student, Interaction1on1, SpecialLabel, User as SystemUser } from '../../types';
 import { Modal } from '../../components/common/Modal';
 import { ConfirmDeleteModal } from '../../components/common/ConfirmDeleteModal';
+import { parseExcelRowsToStudents } from '../../utils/excelParser';
 
 export const StudentList: React.FC = () => {
   const [currentUser, setCurrentUser] = useState<SystemUser>(BOPSStore.getCurrentUser());
@@ -247,150 +248,18 @@ export const StudentList: React.FC = () => {
         const worksheet = workbook.Sheets[firstSheetName];
         const rawJson = XLSX.utils.sheet_to_json(worksheet, { header: 1 }) as any[][];
 
-        if (!rawJson || rawJson.length <= 1) {
-          setUploadError('File Excel không có dữ liệu học sinh hoặc chỉ chứa dòng tiêu đề!');
-          setParsedPreviewList([]);
-          return;
-        }
+        const result = parseExcelRowsToStudents(
+          rawJson,
+          students,
+          currentUser.id,
+          currentUser.fullName
+        );
 
-        // Determine header row index
-        const headerRowIndex = rawJson.findIndex((r) => r && r.length > 0);
-        if (headerRowIndex < 0) {
-          setUploadError('Không tìm thấy dòng tiêu đề trong file Excel!');
-          setParsedPreviewList([]);
-          return;
-        }
-
-        const headers = rawJson[headerRowIndex].map((h) => String(h || '').trim().toLowerCase());
-
-        const findCol = (keywords: string[]) => {
-          return headers.findIndex((h) => keywords.some((kw) => h.includes(kw)));
-        };
-
-        const codeIdx = findCol(['mã', 'code']);
-        const nameIdx = findCol(['họ và tên', 'họ tên', 'tên', 'name', 'học sinh']);
-        const classIdx = findCol(['lớp', 'class']);
-        const roomIdx = findCol(['phòng', 'room', 'ktx']);
-        const genderIdx = findCol(['giới tính', 'gender', 'phái']);
-        const dobIdx = findCol(['ngày sinh', 'birthday', 'dob', 'sinh']);
-        const parentNameIdx = findCol(['phụ huynh', 'cha', 'mẹ', 'parent']);
-        const phoneIdx = findCol(['điện thoại', 'sđt', 'sdt', 'phone']);
-        const healthIdx = findCol(['sức khỏe', 'bệnh', 'dị ứng', 'y tế', 'health', 'medical']);
-        const noteIdx = findCol(['ghi chú', 'lưu ý', 'note']);
-        const specialIdx = findCol(['đặc biệt', 'theo dõi', 'special', 'care', 'ưu tiên']);
-        const labelIdx = findCol(['nhãn', 'phân loại', 'loại', 'label']);
-        const teacherIdx = findCol(['giáo viên', 'quản nhiệm', 'gv', 'teacher']);
-
-        const parsedRows: (Omit<Student, 'id'> & { previewId: string; isDuplicate: boolean })[] = [];
-
-        for (let i = headerRowIndex + 1; i < rawJson.length; i++) {
-          const row = rawJson[i];
-          if (!row || row.length === 0) continue;
-
-          const rawCode = codeIdx >= 0 ? String(row[codeIdx] || '').trim() : '';
-          const rawName = nameIdx >= 0 ? String(row[nameIdx] || '').trim() : '';
-          if (!rawName) continue; // Skip blank name rows
-
-          const studentCode = rawCode || `HS${1000 + i}`;
-          const isDuplicate = students.some(
-            (s) => s.studentCode.trim().toLowerCase() === studentCode.toLowerCase()
-          );
-
-          const className = classIdx >= 0 ? String(row[classIdx] || '').trim() : '10A1';
-          const roomName = roomIdx >= 0 ? String(row[roomIdx] || '').trim() : 'DomB-101';
-          const rawGender = genderIdx >= 0 ? String(row[genderIdx] || '').trim().toLowerCase() : 'nam';
-          const gender: 'nam' | 'nữ' =
-            rawGender.includes('nữ') || rawGender.includes('nu') || rawGender.includes('female')
-              ? 'nữ'
-              : 'nam';
-          const rawDob = dobIdx >= 0 ? String(row[dobIdx] || '').trim() : '2008-05-15';
-          const parentName = parentNameIdx >= 0 ? String(row[parentNameIdx] || '').trim() : 'Phụ huynh HS';
-          const parentPhone = phoneIdx >= 0 ? String(row[phoneIdx] || '').trim() : '0901234567';
-
-          const healthNote = healthIdx >= 0 ? String(row[healthIdx] || '').trim() : '';
-          const note = noteIdx >= 0 ? String(row[noteIdx] || '').trim() : '';
-
-          const rawSpecial = specialIdx >= 0 ? String(row[specialIdx] || '').trim().toLowerCase() : '';
-          const rawLabel = labelIdx >= 0 ? String(row[labelIdx] || '').trim().toLowerCase() : '';
-
-          // Automatic categorization into Special Care / Need Tracking
-          const hasExplicitSpecial =
-            rawSpecial.includes('có') ||
-            rawSpecial.includes('yes') ||
-            rawSpecial === '1' ||
-            rawSpecial.includes('true') ||
-            rawSpecial.includes('x');
-
-          const hasHealthInfo = healthNote.length > 0;
-          const hasNoteworthyNotes =
-            note.toLowerCase().includes('sức khỏe') ||
-            note.toLowerCase().includes('hen') ||
-            note.toLowerCase().includes('tim') ||
-            note.toLowerCase().includes('dị ứng') ||
-            note.toLowerCase().includes('tâm lý') ||
-            note.toLowerCase().includes('căng thẳng') ||
-            note.toLowerCase().includes('kỷ luật') ||
-            note.toLowerCase().includes('theo dõi');
-
-          const specialCare = hasExplicitSpecial || hasHealthInfo || hasNoteworthyNotes;
-
-          const specialLabels: SpecialLabel[] = [];
-          if (hasHealthInfo || rawLabel.includes('sức khỏe') || rawLabel.includes('health')) {
-            specialLabels.push('health_issue');
-          }
-          if (rawLabel.includes('tâm lý') || rawLabel.includes('mental')) {
-            specialLabels.push('mental_support');
-          }
-          if (rawLabel.includes('học tập') || rawLabel.includes('academic')) {
-            specialLabels.push('academic_risk');
-          }
-          if (rawLabel.includes('kỷ luật') || rawLabel.includes('hành vi') || rawLabel.includes('behavior')) {
-            specialLabels.push('behavior_issue');
-          }
-          if (rawLabel.includes('yêu cầu') || rawLabel.includes('phụ huynh') || rawLabel.includes('parent')) {
-            specialLabels.push('parent_request');
-          }
-
-          if (specialCare && specialLabels.length === 0) {
-            if (hasHealthInfo) specialLabels.push('health_issue');
-            else specialLabels.push('other');
-          }
-
-          const teacherName = teacherIdx >= 0 ? String(row[teacherIdx] || '').trim() : 'Bùi Ngọc Thắng';
-          const matchedTeacher = teachers.find(
-            (t) => t.fullName.toLowerCase() === teacherName.toLowerCase()
-          );
-
-          parsedRows.push({
-            previewId: `prev-${i}`,
-            studentCode,
-            fullName: rawName,
-            className: className || '10A1',
-            roomId: `rm-${roomName}`,
-            roomName: roomName || 'DomB-101',
-            gender,
-            birthday: rawDob || '2008-05-15',
-            parentName: parentName || 'Phụ huynh HS',
-            parentPhone: parentPhone || '0901234567',
-            status: 'active',
-            specialCare,
-            specialLabels,
-            healthNote: healthNote || undefined,
-            note: note || undefined,
-            teacherId: currentUser.role === 'teacher' ? currentUser.id : (matchedTeacher?.id || 'u-gv-001'),
-            teacherName: currentUser.role === 'teacher' ? currentUser.fullName : (teacherName || 'Bùi Ngọc Thắng'),
-            uploadedByUserId: currentUser.id,
-            uploadedByUserName: currentUser.fullName,
-            interactionCountThisMonth: 0,
-            isDuplicate,
-          });
-        }
-
-        if (parsedRows.length === 0) {
-          setUploadError('Không tìm thấy dòng học sinh hợp lệ nào trong file Excel!');
+        if (!result.success || result.students.length === 0) {
+          setUploadError(result.error || 'Không tìm thấy dòng học sinh hợp lệ nào trong file Excel!');
           setParsedPreviewList([]);
         } else {
-          setParsedPreviewList(parsedRows);
+          setParsedPreviewList(result.students);
           setUploadError(null);
         }
       } catch (err: any) {
@@ -694,13 +563,13 @@ export const StudentList: React.FC = () => {
         <div>
           <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-purple-600 dark:text-purple-400">
             <GraduationCap className="h-4 w-4" />
-            <span>Hồ sơ Học sinh Nội trú DomB</span>
+            <span>Hồ sơ Học sinh Nội trú Toàn trường</span>
           </div>
           <h2 className="text-xl font-extrabold text-slate-900 dark:text-white mt-1">
-            Quản lý Học sinh & Danh sách Cần Theo Dõi Đặc Biệt
+            Quản lý Học sinh Nội trú Toàn trường & Hồ sơ Theo dõi Đặc biệt
           </h2>
           <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-            Upload danh sách học sinh bằng Excel, chỉnh sửa đầy đủ thông tin, theo dõi sát sao hồ sơ sức khỏe và ghi chú quản nhiệm.
+            Quản lý danh sách học sinh nội trú toàn trường bằng Excel, thông tin sức khỏe y tế, nền nếp KTX và phân quyền quản nhiệm.
           </p>
         </div>
 

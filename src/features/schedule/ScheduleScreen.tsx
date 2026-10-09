@@ -476,7 +476,7 @@ export const ScheduleScreen: React.FC = () => {
             <span>Quản Lý Lịch Trực Quản Nhiệm</span>
           </div>
           <h2 className="text-xl font-extrabold text-slate-900 dark:text-white mt-1">
-            Phân Công Ca Trực & Chia Lịch Trực Lĩnh Hoạt
+            Phân Công Ca Trực & Chia Lịch Trực Linh Hoạt
           </h2>
         </div>
 

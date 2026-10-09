@@ -44,9 +44,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
         },
         {
           id: 'students',
-          label: 'Quản lý Học sinh',
+          label: 'Học sinh nội trú toàn trường',
           icon: GraduationCap,
-          description: 'Upload Excel & chỉnh sửa hồ sơ học sinh của bạn',
+          description: 'Upload Excel & chỉnh sửa hồ sơ học sinh nội trú thuộc diện quản nhiệm',
         },
         {
           id: 'interactions',
@@ -60,7 +60,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
           label: 'Đánh giá KPI & Xếp hạng',
           icon: Award,
           badge: 'Xem KQ',
-          description: 'Xem hiệu suất KPI & nhận xét từ Quản lý Thầy Lê Huy Phúc',
+          description: 'Xem hiệu suất KPI hằng ngày/tuần/tháng & nhận xét từ Quản lý',
         },
         {
           id: 'reports',
@@ -83,7 +83,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
           label: 'Trung tâm Vận hành',
           icon: Activity,
           badge: 'Live',
-          description: 'Giám sát ca & cảnh báo thời gian thực',
+          description: 'Giám sát ca, chấm điểm & điều hành thời gian thực',
         },
         {
           id: 'teachers',
@@ -92,10 +92,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
           description: 'Danh sách nhân sự & khối lượng công việc',
         },
         {
-          id: 'tasks',
-          label: 'Trung tâm Công việc',
-          icon: CheckSquare,
-          description: 'Checklist ca sáng, trưa, chiều, tối',
+          id: 'students',
+          label: 'Học sinh nội trú toàn trường',
+          icon: GraduationCap,
+          description: 'Hồ sơ học sinh nội trú toàn trường & diện theo dõi đặc biệt',
         },
         {
           id: 'interactions',
@@ -109,13 +109,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
           label: 'Đánh giá KPI & Xếp hạng',
           icon: Award,
           badge: 'Admin chấm',
-          description: 'Chỉ số hiệu suất & Admin Lê Huy Phúc đánh giá hằng ngày',
-        },
-        {
-          id: 'students',
-          label: 'Quản lý Học sinh',
-          icon: GraduationCap,
-          description: 'Danh sách học sinh & đối tượng ưu tiên',
+          description: 'Thống kê xếp hạng hằng ngày/tuần/tháng & đồng bộ từ Trung tâm Vận hành',
         },
         {
           id: 'rooms',
@@ -125,9 +119,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
         },
         {
           id: 'schedule',
-          label: 'Lịch trực Template',
+          label: 'Phân công Lịch trực',
           icon: Calendar,
-          description: 'Phân công ca & đổi ca',
+          description: 'Xếp lịch ca trực, đổi ca & sao chép tuần',
         },
         {
           id: 'dashboard',

@@ -7,7 +7,6 @@ import { TeacherList } from './features/teachers/TeacherList';
 import { StudentList } from './features/students/StudentList';
 import { RoomList } from './features/rooms/RoomList';
 import { ScheduleScreen } from './features/schedule/ScheduleScreen';
-import { TaskCenter } from './features/tasks/TaskCenter';
 import { InteractionCenter } from './features/interactions/InteractionCenter';
 import { KPICenter } from './features/kpi/KPICenter';
 import { DashboardScreen } from './features/dashboard/DashboardScreen';
@@ -86,7 +85,6 @@ export default function App() {
                 {activeModule === 'students' && <StudentList />}
                 {activeModule === 'rooms' && <RoomList />}
                 {activeModule === 'schedule' && <ScheduleScreen />}
-                {activeModule === 'tasks' && <TaskCenter />}
                 {activeModule === 'interactions' && <InteractionCenter />}
                 {activeModule === 'kpi' && <KPICenter />}
                 {activeModule === 'dashboard' && <DashboardScreen setActiveModule={setActiveModule} />}

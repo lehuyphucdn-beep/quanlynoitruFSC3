@@ -11,6 +11,7 @@ import {
   User as UserIcon,
   Copy,
   Edit2,
+  X,
 } from 'lucide-react';
 import { BOPSStore, subscribeToStore } from '../../services/storage';
 import { User } from '../../types';
@@ -250,7 +251,7 @@ export const SettingsScreen: React.FC = () => {
               <span className="font-bold text-emerald-600">20%</span>
             </div>
 
-            {/* C. Chăm sóc Học sinh 1-1 (Student Care) - Cấu hình Quy định mới */}
+            {/* C. Tương tác Học sinh 1-1 (Student Care) - Cấu hình Quy định */}
             <div className="rounded-2xl border-2 border-purple-300 bg-purple-50/70 p-4 dark:border-purple-800 dark:bg-purple-950/30 space-y-3">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-purple-200/80 pb-2 dark:border-purple-900">
                 <div className="flex items-center gap-2">
@@ -258,7 +259,7 @@ export const SettingsScreen: React.FC = () => {
                     C
                   </span>
                   <span className="font-extrabold text-slate-900 dark:text-white text-xs sm:text-sm">
-                    Chăm sóc & Tương tác Học sinh 1-1 (Student Care)
+                    Tương tác Học sinh 1-1 (Student Care)
                   </span>
                 </div>
                 <div className="flex items-center gap-2">
@@ -273,10 +274,10 @@ export const SettingsScreen: React.FC = () => {
                 <div className="rounded-xl border border-emerald-300 bg-emerald-50/80 p-3 dark:border-emerald-800 dark:bg-emerald-950/40">
                   <div className="flex items-center gap-1.5 font-black text-emerald-800 dark:text-emerald-300">
                     <Check className="h-4 w-4 text-emerald-600" />
-                    <span>ĐIỀU KIỆN ĐẠT ĐIỂM (15/15 ĐIỂM):</span>
+                    <span>ĐIỀU KIỆN ĐẠT ĐIỂM TRỌNG SỐ (15/15 ĐIỂM):</span>
                   </div>
                   <p className="mt-1 text-[11px] text-emerald-900 dark:text-emerald-200 leading-relaxed font-semibold">
-                    Trong tuần đó, giáo viên quản nhiệm <strong>tối thiểu phải nhập tương tác với 1 học sinh</strong> (≥ 1 lượt tương tác 1-1). Hệ thống sẽ tự động chấm <strong>Đạt trọn vẹn 15 điểm trọng số</strong>.
+                    Trong tuần đó <strong>tối thiểu nhập tương tác 1 học sinh</strong> (≥ 1 lượt tương tác 1-1) → Hệ thống ghi nhận <strong>Đạt điểm trọng số (15/15 điểm)</strong>.
                   </p>
                 </div>
 
@@ -286,17 +287,17 @@ export const SettingsScreen: React.FC = () => {
                     <span>ĐIỀU KIỆN KHÔNG ĐẠT (0 ĐIỂM):</span>
                   </div>
                   <p className="mt-1 text-[11px] text-rose-900 dark:text-rose-200 leading-relaxed font-semibold">
-                    Nếu trong tuần đó <strong>không nhập tương tác học sinh nào (0 học sinh)</strong> thì sẽ <strong>KHÔNG ĐẠT (0 điểm)</strong> phần điểm trọng số chăm sóc học sinh này.
+                    Nếu trong tuần đó <strong>không nhập tương tác học sinh nào (0 học sinh)</strong> → Hệ thống ghi nhận <strong>Không đạt (0 điểm)</strong> phần điểm trọng số này.
                   </p>
                 </div>
               </div>
 
               <div className="flex items-center justify-between text-[11px] text-slate-500 pt-1">
                 <span>
-                  • Áp dụng tự động đối soát trong KPI hằng ngày & hằng tuần của tất cả GVQN.
+                  • Áp dụng tự động đối soát trong KPI hằng ngày & hằng tuần của tất cả Giáo viên Quản nhiệm.
                 </span>
                 <span className="font-bold text-purple-700 dark:text-purple-300">
-                  Chỉ tiêu: Tối thiểu 1 HS/tuần
+                  Chỉ tiêu tối thiểu: ≥ 1 HS / tuần
                 </span>
               </div>
             </div>
