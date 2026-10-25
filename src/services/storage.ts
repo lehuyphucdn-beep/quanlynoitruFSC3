@@ -269,7 +269,7 @@ function roomToDb(r: Room) {
     id: r.id,
     room_name: r.roomName,
     building: r.building,
-    floor: r.floor,
+    floor: Number(String(r.floor).replace(/^tầng\s*/i, '').trim()),
     capacity: r.capacity,
     occupied: r.occupied,
     gender: r.gender,
