@@ -31,7 +31,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
 }) => {
   const isLoggedIn = BOPSStore.isLoggedIn();
   const currentUser = BOPSStore.getCurrentUser();
-  const isManager = isLoggedIn && currentUser.role === 'manager';
+  const isManager = isLoggedIn && currentUser?.role === 'manager';
 
   const menuItems = !isManager
     ? [
@@ -177,7 +177,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
         {/* Current User Badge Card */}
         <div className="p-4 border-b border-slate-800/80 bg-slate-950/40">
-          {isLoggedIn ? (
+          {isLoggedIn && currentUser ? (
             <div className="flex items-center gap-3">
               <img
                 src={currentUser.avatar}

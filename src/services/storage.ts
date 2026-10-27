@@ -32,7 +32,7 @@ import {
 import { supabase, isSupabaseConfigured } from './supabase';
 
 /**
- * Các key CHỈ dùng cho client-side / UI state (được phép lưu trên browser của user)
+ * CÃ¡c key CHá»ˆ dÃ¹ng cho client-side / UI state (Ä‘Æ°á»£c phÃ©p lÆ°u trÃªn browser cá»§a user)
  */
 const CLIENT_STORAGE_KEYS = {
   CURRENT_USER_ID: 'bops_client_current_user_id',
@@ -61,7 +61,7 @@ function notifySubscribers() {
 
 // ============================================================================
 // SINGLE SOURCE OF TRUTH (IN-MEMORY STATE SYNCHRONIZED WITH SUPABASE POSTGRESQL)
-// Dữ liệu nghiệp vụ KHÔNG lưu vào localStorage. Toàn bộ đọc/ghi trực tiếp với Supabase.
+// Dá»¯ liá»‡u nghiá»‡p vá»¥ KHÃ”NG lÆ°u vÃ o localStorage. ToÃ n bá»™ Ä‘á»c/ghi trá»±c tiáº¿p vá»›i Supabase.
 // ============================================================================
 interface AppDatabaseState {
   users: User[];
@@ -77,27 +77,54 @@ interface AppDatabaseState {
   notifications: NotificationItem[];
   auditLogs: AuditLog[];
   settings: DepartmentSettings;
+  currentAuthUser: User | null;
+  isAuthChecking: boolean;
+  authError: string | null;
+  syncError: string | null;
   isInitialized: boolean;
   isSyncing: boolean;
 }
 
 const state: AppDatabaseState = {
-  users: [...INITIAL_USERS],
-  students: [...INITIAL_STUDENTS],
-  rooms: [...INITIAL_ROOMS],
-  positions: [...INITIAL_POSITIONS],
-  schedules: [...INITIAL_SCHEDULE_ASSIGNMENTS],
-  tasks: [...INITIAL_TASK_INSTANCES],
-  interactions: [...INITIAL_INTERACTIONS],
-  kpis: [...INITIAL_KPIS],
-  dailyEvaluations: [...INITIAL_DAILY_EVALUATIONS],
-  dailyWorkReports: [...INITIAL_DAILY_WORK_REPORTS],
-  notifications: [...INITIAL_NOTIFICATIONS],
-  auditLogs: [...INITIAL_AUDIT_LOGS],
+  users: [],
+  students: [],
+  rooms: [],
+  positions: [],
+  schedules: [],
+  tasks: [],
+  interactions: [],
+  kpis: [],
+  dailyEvaluations: [],
+  dailyWorkReports: [],
+  notifications: [],
+  auditLogs: [],
   settings: { ...INITIAL_SETTINGS },
+  currentAuthUser: null,
+  isAuthChecking: true,
+  authError: null,
+  syncError: null,
   isInitialized: false,
   isSyncing: false,
 };
+
+export function clearBusinessData(): void {
+  state.users = [];
+  state.students = [];
+  state.rooms = [];
+  state.positions = [];
+  state.schedules = [];
+  state.tasks = [];
+  state.interactions = [];
+  state.kpis = [];
+  state.dailyEvaluations = [];
+  state.dailyWorkReports = [];
+  state.notifications = [];
+  state.auditLogs = [];
+  state.settings = { ...INITIAL_SETTINGS };
+  state.isInitialized = false;
+  state.isSyncing = false;
+  state.syncError = null;
+}
 
 // ============================================================================
 // DATA CONVERTERS: TYPESCRIPT CAMELCASE <-> SUPABASE POSTGRESQL SNAKE_CASE
@@ -108,7 +135,6 @@ function userToDb(u: User) {
     teacher_code: u.teacherCode,
     full_name: u.fullName,
     username: u.username || null,
-    password: u.password || null,
     email: u.email || null,
     phone: u.phone || null,
     avatar: u.avatar || null,
@@ -125,9 +151,12 @@ function userToDb(u: User) {
     assigned_student_ids: u.assignedStudentIds || [],
     assigned_building: u.assignedBuilding || 'DomB',
     workload_index: u.workloadIndex ?? 1.0,
+    auth_user_id: u.authUserId || null,
     updated_at: new Date().toISOString(),
   };
 }
+
+const USERS_SELECT_FIELDS = 'id, teacher_code, full_name, username, email, phone, avatar, role, position, status, department_id, employment_date, birthday, gender, address, night_shift_eligible, assigned_room_ids, assigned_student_ids, assigned_building, workload_index, auth_user_id, updated_at';
 
 function dbToUser(row: any): User {
   return {
@@ -135,7 +164,7 @@ function dbToUser(row: any): User {
     teacherCode: row.teacher_code || '',
     fullName: row.full_name || '',
     username: row.username || undefined,
-    password: row.password || undefined,
+    password: undefined,
     email: row.email || '',
     phone: row.phone || '',
     avatar: row.avatar || '',
@@ -152,6 +181,7 @@ function dbToUser(row: any): User {
     assignedStudentIds: row.assigned_student_ids || [],
     assignedBuilding: row.assigned_building || 'DomB',
     workloadIndex: Number(row.workload_index) || 1.0,
+    authUserId: row.auth_user_id || undefined,
   };
 }
 
@@ -269,7 +299,7 @@ function roomToDb(r: Room) {
     id: r.id,
     room_name: r.roomName,
     building: r.building,
-    floor: r.floor,
+    floor: Number(String(r.floor).replace(/^tầng\s*/i, '').trim()),
     capacity: r.capacity,
     occupied: r.occupied,
     gender: r.gender,
@@ -432,7 +462,7 @@ function dbToEval(row: any): DailyEvaluation {
     teacherName: row.teacher_name,
     teacherCode: row.teacher_code || '',
     evaluatorId: row.evaluator_id || 'u-mgr-01',
-    evaluatorName: row.evaluator_name || 'Thầy Lê Huy Phúc',
+    evaluatorName: row.evaluator_name || 'Tháº§y LÃª Huy PhÃºc',
     evaluatedAt: row.evaluated_at || new Date().toISOString(),
     operationScore: Number(row.operation_score) || 50,
     qualityScore: Number(row.quality_score) || 20,
@@ -675,211 +705,131 @@ function dbToAudit(row: any): AuditLog {
 }
 
 // ============================================================================
-// SUPABASE REALTIME & INITIAL FETCH
-// Tải toàn bộ dữ liệu từ PostgreSQL ngay khi khởi động và lắng nghe thay đổi
+// SUPABASE REALTIME & BUSINESS DATA SYNC (CHá»ˆ CHáº Y SAU KHI ÄÄ‚NG NHáº¬P THÃ€NH CÃ”NG)
 // ============================================================================
-export async function initializeDatabaseSync(): Promise<void> {
-  if (!supabase || !isSupabaseConfigured) {
-    console.warn(
-      'Supabase chưa được cấu hình qua biến môi trường. Chạy với dữ liệu mẫu trong RAM.'
-    );
-    state.isInitialized = true;
-    notifySubscribers();
-    return;
-  }
+let activeSyncedUserId: string | null = null;
+let isSyncInProgress = false;
+let realtimeChannel: any = null;
 
-  if (state.isSyncing) return;
-  state.isSyncing = true;
-
-  try {
-    // 1. Tải bảng users
-    const { data: dbUsers, error: errUsers } = await supabase
-      .from('users')
-      .select('*')
-      .order('teacher_code', { ascending: true });
-
-    if (!errUsers && dbUsers && dbUsers.length > 0) {
-      state.users = dbUsers.map(dbToUser);
-    } else if (!errUsers && (!dbUsers || dbUsers.length === 0)) {
-      const payload = INITIAL_USERS.map(userToDb);
-      await supabase.from('users').insert(payload);
+export function teardownRealtimeSubscription(): void {
+  if (realtimeChannel && supabase) {
+    try {
+      supabase.removeChannel(realtimeChannel);
+    } catch (e) {
+      console.warn('[BOPS Realtime] Lá»—i khi há»§y Realtime channel:', e);
     }
-
-    // 2. Tải bảng students
-    const { data: dbStudents, error: errStudents } = await supabase
-      .from('students')
-      .select('*')
-      .order('student_code', { ascending: true });
-
-    if (!errStudents && dbStudents && dbStudents.length > 0) {
-      state.students = dbStudents.map(dbToStudent);
-    } else if (!errStudents && (!dbStudents || dbStudents.length === 0)) {
-      // Seed dữ liệu khởi tạo lần đầu vào Supabase nếu bảng còn trống
-      const payload = INITIAL_STUDENTS.map(studentToDb);
-      await supabase.from('students').insert(payload);
-    }
-
-    // 3. Tải bảng rooms
-    const { data: dbRooms, error: errRooms } = await supabase
-      .from('rooms')
-      .select('*')
-      .order('room_name', { ascending: true });
-
-    if (!errRooms && dbRooms && dbRooms.length > 0) {
-      state.rooms = dbRooms.map(dbToRoom);
-    } else if (!errRooms && (!dbRooms || dbRooms.length === 0)) {
-      const payload = INITIAL_ROOMS.map(roomToDb);
-      await supabase.from('rooms').insert(payload);
-    }
-
-    // 4. Tải bảng positions
-    const { data: dbPositions, error: errPositions } = await supabase
-      .from('positions')
-      .select('*')
-      .order('position_code', { ascending: true });
-
-    if (!errPositions && dbPositions && dbPositions.length > 0) {
-      state.positions = dbPositions.map(dbToPosition);
-    } else if (!errPositions && (!dbPositions || dbPositions.length === 0)) {
-      const payload = INITIAL_POSITIONS.map(positionToDb);
-      await supabase.from('positions').insert(payload);
-    }
-
-    // 5. Tải bảng interactions
-    const { data: dbInteractions, error: errInter } = await supabase
-      .from('interactions')
-      .select('*')
-      .order('interaction_date', { ascending: false });
-
-    if (!errInter && dbInteractions && dbInteractions.length > 0) {
-      state.interactions = dbInteractions.map(dbToInteraction);
-    } else if (!errInter && (!dbInteractions || dbInteractions.length === 0)) {
-      const payload = INITIAL_INTERACTIONS.map(interactionToDb);
-      await supabase.from('interactions').insert(payload);
-    }
-
-    // 6. Tải bảng daily_work_reports
-    const { data: dbReports, error: errReports } = await supabase
-      .from('daily_work_reports')
-      .select('*')
-      .order('date', { ascending: false });
-
-    if (!errReports && dbReports && dbReports.length > 0) {
-      state.dailyWorkReports = dbReports.map(dbToReport);
-    } else if (!errReports && (!dbReports || dbReports.length === 0)) {
-      const payload = INITIAL_DAILY_WORK_REPORTS.map(reportToDb);
-      await supabase.from('daily_work_reports').insert(payload);
-    }
-
-    // 7. Tải bảng daily_evaluations
-    const { data: dbEvals, error: errEvals } = await supabase
-      .from('daily_evaluations')
-      .select('*')
-      .order('date', { ascending: false });
-
-    if (!errEvals && dbEvals && dbEvals.length > 0) {
-      state.dailyEvaluations = dbEvals.map(dbToEval);
-    } else if (!errEvals && (!dbEvals || dbEvals.length === 0)) {
-      const payload = INITIAL_DAILY_EVALUATIONS.map(evalToDb);
-      await supabase.from('daily_evaluations').insert(payload);
-    }
-
-    // 8. Tải bảng schedules
-    const { data: dbSchedules, error: errSchedules } = await supabase
-      .from('schedules')
-      .select('*')
-      .order('date', { ascending: false });
-
-    if (!errSchedules && dbSchedules && dbSchedules.length > 0) {
-      state.schedules = dbSchedules.map(dbToSchedule);
-    } else if (!errSchedules && (!dbSchedules || dbSchedules.length === 0)) {
-      const payload = INITIAL_SCHEDULE_ASSIGNMENTS.map(scheduleToDb);
-      await supabase.from('schedules').insert(payload);
-    }
-
-    // 9. Tải bảng tasks
-    const { data: dbTasks, error: errTasks } = await supabase
-      .from('tasks')
-      .select('*')
-      .order('date', { ascending: false });
-
-    if (!errTasks && dbTasks && dbTasks.length > 0) {
-      state.tasks = dbTasks.map(dbToTask);
-    } else if (!errTasks && (!dbTasks || dbTasks.length === 0)) {
-      const payload = INITIAL_TASK_INSTANCES.map(taskToDb);
-      await supabase.from('tasks').insert(payload);
-    }
-
-    // 10. Tải bảng kpis
-    const { data: dbKpis, error: errKpis } = await supabase
-      .from('kpis')
-      .select('*')
-      .order('date', { ascending: false });
-
-    if (!errKpis && dbKpis && dbKpis.length > 0) {
-      state.kpis = dbKpis.map(dbToKpi);
-    } else if (!errKpis && (!dbKpis || dbKpis.length === 0)) {
-      const payload = INITIAL_KPIS.map(kpiToDb);
-      await supabase.from('kpis').insert(payload);
-    }
-
-    // 11. Tải bảng notifications
-    const { data: dbNotifs, error: errNotifs } = await supabase
-      .from('notifications')
-      .select('*')
-      .order('created_at', { ascending: false });
-
-    if (!errNotifs && dbNotifs && dbNotifs.length > 0) {
-      state.notifications = dbNotifs.map(dbToNotif);
-    } else if (!errNotifs && (!dbNotifs || dbNotifs.length === 0)) {
-      const payload = INITIAL_NOTIFICATIONS.map(notifToDb);
-      await supabase.from('notifications').insert(payload);
-    }
-
-    // 12. Tải bảng audit_logs
-    const { data: dbAudits, error: errAudits } = await supabase
-      .from('audit_logs')
-      .select('*')
-      .order('timestamp', { ascending: false })
-      .limit(200);
-
-    if (!errAudits && dbAudits && dbAudits.length > 0) {
-      state.auditLogs = dbAudits.map(dbToAudit);
-    } else if (!errAudits && (!dbAudits || dbAudits.length === 0)) {
-      const payload = INITIAL_AUDIT_LOGS.map(auditToDb);
-      await supabase.from('audit_logs').insert(payload);
-    }
-
-    // 13. Tải bảng department_settings
-    const { data: dbSettings, error: errSettings } = await supabase
-      .from('department_settings')
-      .select('*')
-      .eq('id', 'current_settings')
-      .maybeSingle();
-
-    if (!errSettings && dbSettings) {
-      state.settings = dbToSettings(dbSettings);
-    } else if (!errSettings && !dbSettings) {
-      await supabase.from('department_settings').insert(settingsToDb(INITIAL_SETTINGS));
-    }
-
-    // Đăng ký Realtime Channel để nhận cập nhật từ máy khác tức thì
-    setupRealtimeSubscription();
-
-    state.isInitialized = true;
-    notifySubscribers();
-  } catch (err) {
-    console.error('Lỗi trong quá trình khởi tạo kết nối Supabase:', err);
-  } finally {
-    state.isSyncing = false;
+    realtimeChannel = null;
   }
 }
 
-function setupRealtimeSubscription() {
-  if (!supabase) return;
+async function fetchBusinessData(): Promise<void> {
+  if (!supabase || !isSupabaseConfigured) return;
+
+  const results = await Promise.allSettled([
+    supabase.from('users').select(USERS_SELECT_FIELDS).order('teacher_code', { ascending: true }),
+    supabase.from('students').select('*').order('student_code', { ascending: true }),
+    supabase.from('rooms').select('*').order('room_name', { ascending: true }),
+    supabase.from('positions').select('*').order('position_code', { ascending: true }),
+    supabase.from('interactions').select('*').order('interaction_date', { ascending: false }),
+    supabase.from('daily_work_reports').select('*').order('date', { ascending: false }),
+    supabase.from('daily_evaluations').select('*').order('date', { ascending: false }),
+    supabase.from('schedules').select('*').order('date', { ascending: false }),
+    supabase.from('tasks').select('*').order('date', { ascending: false }),
+    supabase.from('kpis').select('*').order('date', { ascending: false }),
+    supabase.from('notifications').select('*').order('created_at', { ascending: false }),
+    supabase.from('audit_logs').select('*').order('timestamp', { ascending: false }).limit(200),
+    supabase.from('department_settings').select('*').eq('id', 'current_settings').maybeSingle(),
+  ]);
+
+  const [
+    resUsers,
+    resStudents,
+    resRooms,
+    resPositions,
+    resInteractions,
+    resReports,
+    resEvals,
+    resSchedules,
+    resTasks,
+    resKpis,
+    resNotifs,
+    resAudits,
+    resSettings,
+  ] = results;
+
+  const tableNames = [
+    'users', 'students', 'rooms', 'positions', 'interactions',
+    'daily_work_reports', 'daily_evaluations', 'schedules', 'tasks',
+    'kpis', 'notifications', 'audit_logs', 'department_settings'
+  ];
+
+  const failedTables: string[] = [];
+  results.forEach((res, idx) => {
+    if (res.status === 'rejected') {
+      failedTables.push(`${tableNames[idx]} (lá»—i káº¿t ná»‘i: ${res.reason})`);
+      console.error(`[BOPS Fetch] Lá»—i káº¿t ná»‘i truy váº¥n báº£ng ${tableNames[idx]}:`, res.reason);
+    } else if (res.value.error) {
+      failedTables.push(`${tableNames[idx]} (mÃ£: ${res.value.error.code}, thÃ´ng Ä‘iá»‡p: ${res.value.error.message})`);
+      console.error(`[BOPS Fetch] Supabase tráº£ vá» lá»—i truy váº¥n báº£ng ${tableNames[idx]}:`, res.value.error);
+    }
+  });
+
+  if (failedTables.length > 0) {
+    state.syncError = `PhÃ¡t hiá»‡n ${failedTables.length}/13 báº£ng khÃ´ng thá»ƒ táº£i: ${failedTables.join(', ')}`;
+    console.warn(`[BOPS Sync] PhÃ¡t hiá»‡n ${failedTables.length}/13 báº£ng khÃ´ng thá»ƒ táº£i dá»¯ liá»‡u tá»« Supabase:\n - ${failedTables.join('\n - ')}`);
+  } else {
+    state.syncError = null;
+  }
+
+  if (resUsers.status === 'fulfilled' && !resUsers.value.error && resUsers.value.data) {
+    state.users = resUsers.value.data.map(dbToUser);
+  }
+  if (resStudents.status === 'fulfilled' && !resStudents.value.error && resStudents.value.data) {
+    state.students = resStudents.value.data.map(dbToStudent);
+  }
+  if (resRooms.status === 'fulfilled' && !resRooms.value.error && resRooms.value.data) {
+    state.rooms = resRooms.value.data.map(dbToRoom);
+  }
+  if (resPositions.status === 'fulfilled' && !resPositions.value.error && resPositions.value.data) {
+    state.positions = resPositions.value.data.map(dbToPosition);
+  }
+  if (resInteractions.status === 'fulfilled' && !resInteractions.value.error && resInteractions.value.data) {
+    state.interactions = resInteractions.value.data.map(dbToInteraction);
+  }
+  if (resReports.status === 'fulfilled' && !resReports.value.error && resReports.value.data) {
+    state.dailyWorkReports = resReports.value.data.map(dbToReport);
+  }
+  if (resEvals.status === 'fulfilled' && !resEvals.value.error && resEvals.value.data) {
+    state.dailyEvaluations = resEvals.value.data.map(dbToEval);
+  }
+  if (resSchedules.status === 'fulfilled' && !resSchedules.value.error && resSchedules.value.data) {
+    state.schedules = resSchedules.value.data.map(dbToSchedule);
+  }
+  if (resTasks.status === 'fulfilled' && !resTasks.value.error && resTasks.value.data) {
+    state.tasks = resTasks.value.data.map(dbToTask);
+  }
+  if (resKpis.status === 'fulfilled' && !resKpis.value.error && resKpis.value.data) {
+    state.kpis = resKpis.value.data.map(dbToKpi);
+  }
+  if (resNotifs.status === 'fulfilled' && !resNotifs.value.error && resNotifs.value.data) {
+    state.notifications = resNotifs.value.data.map(dbToNotif);
+  }
+  if (resAudits.status === 'fulfilled' && !resAudits.value.error && resAudits.value.data) {
+    state.auditLogs = resAudits.value.data.map(dbToAudit);
+  }
+  if (resSettings.status === 'fulfilled' && !resSettings.value.error && resSettings.value.data) {
+    state.settings = dbToSettings(resSettings.value.data);
+  }
+}
+
+function setupRealtimeSubscription(): void {
+  if (!supabase || !isSupabaseConfigured) return;
+
+  // Há»§y subscription cÅ© náº¿u cÃ³ Ä‘á»ƒ trÃ¡nh Ä‘Äƒng kÃ½ trÃ¹ng láº·p
+  teardownRealtimeSubscription();
 
   try {
-    supabase
+    realtimeChannel = supabase
       .channel('bops-realtime-sync')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'users' }, (payload) => {
         if (payload.eventType === 'INSERT') {
@@ -1065,52 +1015,475 @@ function setupRealtimeSubscription() {
       })
       .subscribe();
   } catch (err) {
-    console.error('Lỗi khi thiết lập Realtime channel:', err);
+    console.error('[BOPS Realtime] Lá»—i khi thiáº¿t láº­p Realtime channel:', err);
   }
 }
 
-// Gọi tự động khởi tạo kết nối Supabase khi import module
-if (typeof window !== 'undefined') {
-  initializeDatabaseSync();
+/**
+ * Khá»Ÿi táº¡o Ä‘á»“ng bá»™ dá»¯ liá»‡u nghiá»‡p vá»¥ vÃ  Realtime cho ngÆ°á»i dÃ¹ng Ä‘Ã£ xÃ¡c thá»±c.
+ * Chá»‘ng trÃ¹ng láº·p khi Ä‘Æ°á»£c gá»i Ä‘á»“ng thá»i qua syncBusinessPromise lock.
+ */
+let syncBusinessPromise: Promise<void> | null = null;
+
+export async function syncBusinessDataAndRealtime(user: User): Promise<void> {
+  if (activeSyncedUserId === user.id && state.isInitialized) {
+    return;
+  }
+  if (syncBusinessPromise) {
+    return syncBusinessPromise;
+  }
+
+  activeSyncedUserId = user.id;
+  isSyncInProgress = true;
+  state.isSyncing = true;
+  notifySubscribers();
+
+  syncBusinessPromise = (async () => {
+    try {
+      await fetchBusinessData();
+      setupRealtimeSubscription();
+      state.isInitialized = true;
+    } catch (err) {
+      console.error('[BOPS Sync] Lá»—i trong quÃ¡ trÃ¬nh táº£i dá»¯ liá»‡u nghiá»‡p vá»¥:', err);
+    } finally {
+      isSyncInProgress = false;
+      state.isSyncing = false;
+      syncBusinessPromise = null;
+      notifySubscribers();
+    }
+  })();
+
+  return syncBusinessPromise;
+}
+
+export async function initializeDatabaseSync(): Promise<void> {
+  if (state.currentAuthUser) {
+    await syncBusinessDataAndRealtime(state.currentAuthUser);
+  } else {
+    console.warn('[BOPS] Bá» qua initializeDatabaseSync vÃ¬ chÆ°a cÃ³ phiÃªn Ä‘Äƒng nháº­p há»£p lá»‡.');
+  }
 }
 
 // ============================================================================
-// BOPS STORE - CHÍNH THỨC SỬ DỤNG SUPABASE POSTGRESQL LÀM DATABASE CHÍNH
+// SUPABASE AUTH SESSION MANAGEMENT (GIAI ÄOáº N C1 PILOT)
+// ============================================================================
+let authListenerRegistered = false;
+let syncAuthSessionPromise: Promise<void> | null = null;
+let isPasswordRecovery = false;
+
+async function syncAuthSession(sessionUserId: string | null | undefined): Promise<void> {
+  if (!sessionUserId || !supabase || !isSupabaseConfigured) {
+    teardownRealtimeSubscription();
+    activeSyncedUserId = null;
+    isSyncInProgress = false;
+    syncBusinessPromise = null;
+    clearBusinessData();
+    state.currentAuthUser = null;
+    state.authError = null;
+    return;
+  }
+
+  // Náº¿u ngÆ°á»i dÃ¹ng nÃ y Ä‘Ã£ Ä‘Æ°á»£c xÃ¡c thá»±c vÃ  Ä‘á»“ng bá»™ hoÃ n táº¥t, khÃ´ng láº·p láº¡i
+  if (
+    state.currentAuthUser &&
+    state.currentAuthUser.authUserId === sessionUserId &&
+    state.isInitialized &&
+    activeSyncedUserId === state.currentAuthUser.id
+  ) {
+    return;
+  }
+
+  // KhÃ³a chá»‘ng race condition: náº¿u Ä‘ang cÃ³ má»™t Promise sync, dÃ¹ng chung
+  if (syncAuthSessionPromise) {
+    return syncAuthSessionPromise;
+  }
+
+  syncAuthSessionPromise = (async () => {
+    try {
+      // 1. Kiá»ƒm tra trong state.users Ä‘Ã£ cÃ³ há»“ sÆ¡ liÃªn káº¿t vá»›i UID nÃ y chÆ°a
+      let matched = state.users.find((u) => u.authUserId === sessionUserId);
+
+      // 2. Náº¿u chÆ°a cÃ³ trong RAM, CHá»ˆ truy váº¥n Ä‘Ãºng há»“ sÆ¡ ngÆ°á»i dÃ¹ng nÃ y tá»« public.users
+      if (!matched) {
+        const { data: dbUser, error } = await supabase
+          .from('users')
+          .select(USERS_SELECT_FIELDS)
+          .eq('auth_user_id', sessionUserId)
+          .maybeSingle();
+
+        if (error) {
+          console.error('[BOPS Auth] Lá»—i truy váº¥n há»“ sÆ¡ liÃªn káº¿t (giá»¯ session Ä‘á»ƒ thá»­ láº¡i sau):', error);
+          state.authError = 'KhÃ´ng thá»ƒ káº¿t ná»‘i Ä‘áº¿n mÃ¡y chá»§ Ä‘á»ƒ táº£i há»“ sÆ¡ ngÆ°á»i dÃ¹ng.';
+          state.currentAuthUser = null;
+          return;
+        }
+
+        if (dbUser) {
+          matched = dbToUser(dbUser);
+        }
+      }
+
+      if (matched) {
+        state.currentAuthUser = matched;
+        state.authError = null;
+        // Khá»Ÿi táº¡o Ä‘á»“ng bá»™ dá»¯ liá»‡u nghiá»‡p vá»¥ vÃ  Realtime cho há»“ sÆ¡ Ä‘Ã£ xÃ¡c thá»±c
+        await syncBusinessDataAndRealtime(matched);
+      } else {
+        console.warn('[BOPS Auth] Auth session cÃ³ UID há»£p lá»‡ nhÆ°ng chÆ°a cÃ³ há»“ sÆ¡ nghiá»‡p vá»¥ liÃªn káº¿t trong public.users:', sessionUserId);
+        teardownRealtimeSubscription();
+        activeSyncedUserId = null;
+        isSyncInProgress = false;
+        syncBusinessPromise = null;
+        clearBusinessData();
+        state.currentAuthUser = null;
+        state.authError = 'TÃ i khoáº£n Auth chÆ°a Ä‘Æ°á»£c liÃªn káº¿t vá»›i há»“ sÆ¡ cÃ¡n bá»™/giÃ¡o viÃªn FSC3 trong há»‡ thá»‘ng.';
+      }
+    } catch (err: any) {
+      console.error('[BOPS Auth] Ngoáº¡i lá»‡ khi Ä‘á»“ng bá»™ session:', err);
+      state.currentAuthUser = null;
+      state.authError = 'Lá»—i káº¿t ná»‘i khi Ä‘á»“ng bá»™ phiÃªn lÃ m viá»‡c.';
+    } finally {
+      syncAuthSessionPromise = null;
+    }
+  })();
+
+  return syncAuthSessionPromise;
+}
+
+export async function restoreAuthSession(): Promise<void> {
+  if (!supabase || !isSupabaseConfigured) {
+    state.isAuthChecking = false;
+    notifySubscribers();
+    return;
+  }
+
+  // PhÃ¡t hiá»‡n URL phá»¥c há»“i máº­t kháº©u (type=recovery)
+  if (typeof window !== 'undefined') {
+    const hash = window.location.hash || '';
+    const search = window.location.search || '';
+    if (hash.includes('type=recovery') || search.includes('type=recovery')) {
+      isPasswordRecovery = true;
+      state.authError = null;
+    }
+  }
+
+  // Bá»™ háº¹n giá» an toÃ n: tá»‘i Ä‘a 8s pháº£i giáº£i phÃ³ng isAuthChecking dÃ¹ máº¡ng cÃ³ Ä‘á»™ trá»…
+  const safetyTimer = setTimeout(() => {
+    if (state.isAuthChecking) {
+      console.warn('[BOPS Auth] QuÃ¡ thá»i gian chá» khÃ´i phá»¥c phiÃªn (8s), tá»± Ä‘á»™ng giáº£i phÃ³ng cá» kiá»ƒm tra.');
+      state.isAuthChecking = false;
+      notifySubscribers();
+    }
+  }, 8000);
+
+  try {
+    // 1. ÄÄƒng kÃ½ listener onAuthStateChange má»™t láº§n duy nháº¥t
+    if (!authListenerRegistered) {
+      authListenerRegistered = true;
+      supabase.auth.onAuthStateChange(async (event, session) => {
+        if (event === 'PASSWORD_RECOVERY') {
+          isPasswordRecovery = true;
+          try {
+            window.history.replaceState(null, '', window.location.pathname);
+          } catch {}
+          if (session?.user?.id) {
+            await syncAuthSession(session.user.id);
+          }
+          state.isAuthChecking = false;
+          notifySubscribers();
+          return;
+        }
+
+        if (event === 'SIGNED_OUT' || !session?.user?.id) {
+          teardownRealtimeSubscription();
+          activeSyncedUserId = null;
+          isSyncInProgress = false;
+          syncBusinessPromise = null;
+          clearBusinessData();
+          state.currentAuthUser = null;
+          state.authError = null;
+          state.isAuthChecking = false;
+          isPasswordRecovery = false;
+          notifySubscribers();
+          return;
+        }
+
+        if (
+          event === 'SIGNED_IN' ||
+          event === 'TOKEN_REFRESHED' ||
+          event === 'INITIAL_SESSION' ||
+          event === 'USER_UPDATED'
+        ) {
+          await syncAuthSession(session.user.id);
+          state.isAuthChecking = false;
+          notifySubscribers();
+        }
+      });
+    }
+
+    // 2. KhÃ´i phá»¥c session hiá»‡n táº¡i tá»« client storage
+    const { data: { session }, error } = await supabase.auth.getSession();
+    if (error) {
+      console.error('[BOPS Auth] Lá»—i getSession:', error);
+    }
+
+    if (session?.user?.id) {
+      await syncAuthSession(session.user.id);
+    } else {
+      teardownRealtimeSubscription();
+      activeSyncedUserId = null;
+      isSyncInProgress = false;
+      syncBusinessPromise = null;
+      clearBusinessData();
+      state.currentAuthUser = null;
+    }
+  } catch (err) {
+    console.error('[BOPS Auth] Ngoáº¡i lá»‡ khi khÃ´i phá»¥c Auth session ban Ä‘áº§u:', err);
+    state.currentAuthUser = null;
+  } finally {
+    clearTimeout(safetyTimer);
+    state.isAuthChecking = false;
+    notifySubscribers();
+  }
+}
+
+// Khá»Ÿi cháº¡y khÃ´i phá»¥c Auth Session khi module náº¡p (KHÃ”NG gá»i initializeDatabaseSync trÆ°á»›c Ä‘Äƒng nháº­p)
+if (typeof window !== 'undefined') {
+  restoreAuthSession();
+}
+
+// ============================================================================
+// BOPS STORE - CHÃNH THá»¨C Sá»¬ Dá»¤NG SUPABASE POSTGRESQL LÃ€M DATABASE CHÃNH
 // ============================================================================
 export const BOPSStore = {
   // --------------------------------------------------------------------------
-  // USER SESSION / CLIENT STATE (Chỉ lưu Session ID cục bộ trên trình duyệt)
+  // USER SESSION / AUTHENTICATION (SUPABASE AUTH GIAI ÄOáº N C1)
   // --------------------------------------------------------------------------
   isLoggedIn(): boolean {
+    return state.currentAuthUser !== null;
+  },
+
+  getCurrentUser(): User | null {
+    return state.currentAuthUser;
+  },
+
+  isAuthChecking(): boolean {
+    return state.isAuthChecking;
+  },
+
+  getAuthError(): string | null {
+    return state.authError;
+  },
+
+  getSyncError(): string | null {
+    return state.syncError;
+  },
+
+  isPasswordRecovery(): boolean {
+    return isPasswordRecovery;
+  },
+
+  clearPasswordRecovery(): void {
+    isPasswordRecovery = false;
     try {
-      return localStorage.getItem(CLIENT_STORAGE_KEYS.IS_LOGGED_IN) === 'true';
-    } catch {
-      return false;
+      window.history.replaceState(null, '', window.location.pathname);
+    } catch {}
+    notifySubscribers();
+  },
+
+  async loginWithSupabaseAuth(
+    emailInput: string,
+    passwordInput: string
+  ): Promise<{ success: boolean; user?: User; error?: string }> {
+    if (!supabase || !isSupabaseConfigured) {
+      return {
+        success: false,
+        error: 'ChÆ°a cáº¥u hÃ¬nh Supabase Client. Vui lÃ²ng kiá»ƒm tra biáº¿n mÃ´i trÆ°á»ng VITE_SUPABASE_URL!',
+      };
+    }
+
+    const email = emailInput.trim();
+    const password = passwordInput.trim();
+
+    if (!email || !password) {
+      return { success: false, error: 'Vui lÃ²ng nháº­p Ä‘áº§y Ä‘á»§ email vÃ  máº­t kháº©u!' };
+    }
+
+    try {
+      // Äáº·t timeout 15s cho signInWithPassword Ä‘á»ƒ khÃ´ng bao giá» bá»‹ treo nÃºt
+      const signInPromise = supabase.auth.signInWithPassword({
+        email,
+        password,
+      });
+
+      const timeoutPromise = new Promise<never>((_, reject) => {
+        setTimeout(
+          () => reject(new Error('QuÃ¡ thá»i gian pháº£n há»“i tá»« mÃ¡y chá»§ xÃ¡c thá»±c (15s). Vui lÃ²ng thá»­ láº¡i!')),
+          15000
+        );
+      });
+
+      const { data, error } = await Promise.race([signInPromise, timeoutPromise]);
+
+      if (error) {
+        let msg = error.message;
+        if (msg.includes('Invalid login credentials') || msg.includes('invalid_grant')) {
+          msg = 'Email hoáº·c máº­t kháº©u khÃ´ng chÃ­nh xÃ¡c. Vui lÃ²ng kiá»ƒm tra láº¡i!';
+        } else if (msg.includes('Email not confirmed')) {
+          msg = 'Email tÃ i khoáº£n chÆ°a Ä‘Æ°á»£c xÃ¡c nháº­n trÃªn Supabase Auth!';
+        }
+        return {
+          success: false,
+          error: `ÄÄƒng nháº­p khÃ´ng thÃ nh cÃ´ng: ${msg}`,
+        };
+      }
+
+      if (!data.session?.user) {
+        return {
+          success: false,
+          error: 'KhÃ´ng nháº­n Ä‘Æ°á»£c phiÃªn xÃ¡c thá»±c tá»« Supabase Auth.',
+        };
+      }
+
+      const authUid = data.session.user.id;
+
+      // Äá»“ng bá»™ thÃ´ng tin ngÆ°á»i dÃ¹ng vÃ  dá»¯ liá»‡u nghiá»‡p vá»¥
+      await syncAuthSession(authUid);
+
+      if (!state.currentAuthUser) {
+        console.warn('[BOPS Auth] Auth UID chÆ°a Ä‘Æ°á»£c liÃªn káº¿t vá»›i há»“ sÆ¡ users:', authUid);
+        await supabase.auth.signOut();
+        teardownRealtimeSubscription();
+        activeSyncedUserId = null;
+        isSyncInProgress = false;
+        syncBusinessPromise = null;
+        clearBusinessData();
+        state.currentAuthUser = null;
+        notifySubscribers();
+        return {
+          success: false,
+          error: 'TÃ i khoáº£n Auth xÃ¡c thá»±c thÃ nh cÃ´ng nhÆ°ng chÆ°a Ä‘Æ°á»£c liÃªn káº¿t vá»›i há»“ sÆ¡ cÃ¡n bá»™/giÃ¡o viÃªn FSC3 trong há»‡ thá»‘ng. Vui lÃ²ng liÃªn há»‡ Quáº£n lÃ½!',
+        };
+      }
+
+      notifySubscribers();
+      return { success: true, user: state.currentAuthUser };
+    } catch (err: any) {
+      console.error('[BOPS Auth] Ngoáº¡i lá»‡ Ä‘Äƒng nháº­p:', err);
+      return {
+        success: false,
+        error: err?.message || 'Lá»—i ngoáº¡i lá»‡ khi thá»±c hiá»‡n Ä‘Äƒng nháº­p qua Supabase Auth.',
+      };
     }
   },
 
-  getCurrentUser(): User {
-    let currentId = 'u-gv-001';
+  async logout(): Promise<void> {
     try {
-      currentId = localStorage.getItem(CLIENT_STORAGE_KEYS.CURRENT_USER_ID) || 'u-gv-001';
+      if (supabase && isSupabaseConfigured) {
+        await supabase.auth.signOut();
+      }
+    } catch (err) {
+      console.error('[BOPS Auth] Lá»—i khi gá»i signOut:', err);
+    }
+    teardownRealtimeSubscription();
+    activeSyncedUserId = null;
+    isSyncInProgress = false;
+    syncBusinessPromise = null;
+    syncAuthSessionPromise = null;
+    isPasswordRecovery = false;
+    clearBusinessData();
+    state.currentAuthUser = null;
+    state.authError = null;
+    state.isInitialized = false;
+    state.isSyncing = false;
+    state.isAuthChecking = false;
+    try {
+      localStorage.removeItem(CLIENT_STORAGE_KEYS.CURRENT_USER_ID);
+      localStorage.removeItem(CLIENT_STORAGE_KEYS.IS_LOGGED_IN);
     } catch {}
-    const user = state.users.find((u) => u.id === currentId);
-    return user || state.users[0];
+    notifySubscribers();
+  },
+
+  async updateCurrentUserPassword(
+    newPasswordInput: string
+  ): Promise<{ success: boolean; error?: string }> {
+    if (!supabase || !isSupabaseConfigured) {
+      return {
+        success: false,
+        error: 'ChÆ°a cáº¥u hÃ¬nh Supabase Client. Vui lÃ²ng kiá»ƒm tra biáº¿n mÃ´i trÆ°á»ng!',
+      };
+    }
+
+    // Kiá»ƒm tra cÃ³ tÃ i khoáº£n Ä‘Äƒng nháº­p hoáº·c phiÃªn phá»¥c há»“i máº­t kháº©u (recovery session)
+    const { data: { user: authUser } } = await supabase.auth.getUser();
+    if (!state.currentAuthUser && !authUser) {
+      return {
+        success: false,
+        error: 'Báº¡n chÆ°a Ä‘Äƒng nháº­p hoáº·c phiÃªn Ä‘áº·t láº¡i máº­t kháº©u Ä‘Ã£ háº¿t háº¡n!',
+      };
+    }
+
+    const newPassword = newPasswordInput.trim();
+    if (!newPassword || newPassword.length < 6) {
+      return {
+        success: false,
+        error: 'Máº­t kháº©u má»›i pháº£i cÃ³ Ã­t nháº¥t 6 kÃ½ tá»± Ä‘á»ƒ báº£o Ä‘áº£m an toÃ n!',
+      };
+    }
+
+    try {
+      const { data, error } = await supabase.auth.updateUser({
+        password: newPassword,
+      });
+
+      if (error) {
+        console.error('[BOPS Auth] Lá»—i Ä‘á»•i máº­t kháº©u Supabase Auth:', error);
+        return {
+          success: false,
+          error: error.message || 'KhÃ´ng thá»ƒ cáº­p nháº­t máº­t kháº©u trÃªn Supabase Auth.',
+        };
+      }
+
+      if (!data.user) {
+        return {
+          success: false,
+          error: 'KhÃ´ng nháº­n Ä‘Æ°á»£c pháº£n há»“i tÃ i khoáº£n tá»« Supabase Auth.',
+        };
+      }
+
+      // XÃ³a tráº¡ng thÃ¡i recovery sau khi cáº­p nháº­t thÃ nh cÃ´ng
+      isPasswordRecovery = false;
+      try {
+        window.history.replaceState(null, '', window.location.pathname);
+      } catch {}
+
+      // Ghi audit log an toÃ n (khÃ´ng ghi máº­t kháº©u)
+      const current = state.currentAuthUser;
+      if (current) {
+        BOPSStore.addAuditLog(
+          current.id,
+          current.fullName,
+          current.role,
+          'Auth',
+          'UPDATE_PASSWORD',
+          `NgÆ°á»i dÃ¹ng "${current.fullName}" (${current.email || current.teacherCode}) Ä‘Ã£ tá»± Ä‘á»•i máº­t kháº©u qua Supabase Auth.`
+        );
+      }
+
+      notifySubscribers();
+      return { success: true };
+    } catch (err: any) {
+      console.error('[BOPS Auth] Ngoáº¡i lá»‡ khi cáº­p nháº­t máº­t kháº©u:', err);
+      return {
+        success: false,
+        error: err?.message || 'Lá»—i ngoáº¡i lá»‡ khi Ä‘á»•i máº­t kháº©u tÃ i khoáº£n.',
+      };
+    }
   },
 
   setCurrentUser(userId: string): void {
-    try {
-      localStorage.setItem(CLIENT_STORAGE_KEYS.CURRENT_USER_ID, userId);
-      localStorage.setItem(CLIENT_STORAGE_KEYS.IS_LOGGED_IN, 'true');
-    } catch {}
-    notifySubscribers();
-  },
-
-  logout(): void {
-    try {
-      localStorage.setItem(CLIENT_STORAGE_KEYS.IS_LOGGED_IN, 'false');
-    } catch {}
-    notifySubscribers();
+    // VÃ´ hiá»‡u hÃ³a viá»‡c Ã©p gÃ¡n tÃ i khoáº£n qua localStorage á»Ÿ giai Ä‘oáº¡n C1
+    console.warn('[BOPS Auth] setCurrentUser thá»§ cÃ´ng bá»‹ vÃ´ hiá»‡u hÃ³a trong cÆ¡ cháº¿ Supabase Auth.');
   },
 
   // --------------------------------------------------------------------------
@@ -1130,7 +1503,7 @@ export const BOPSStore = {
         .from('users')
         .upsert(payload, { onConflict: 'id' })
         .then(({ error }) => {
-          if (error) console.error('Lỗi khi lưu users vào Supabase:', error);
+          if (error) console.error('Lá»—i khi lÆ°u users vÃ o Supabase:', error);
         });
     }
   },
@@ -1146,76 +1519,335 @@ export const BOPSStore = {
     if (supabase && isSupabaseConfigured) {
       supabase
         .from('users')
-        .upsert(userToDb(newUser), { onConflict: 'id' })
+        .insert(userToDb(newUser))
         .then(({ error }) => {
-          if (error) console.error('Lỗi khi thêm user vào Supabase:', error);
+          if (error) {
+            console.error('[BOPS Add] Lá»—i khi thÃªm user vÃ o Supabase:', error);
+            state.users = state.users.filter((u) => u.id !== newUser.id);
+            notifySubscribers();
+          }
         });
     }
 
     const currentUser = BOPSStore.getCurrentUser();
     BOPSStore.addAuditLog(
-      currentUser.id,
-      currentUser.fullName,
-      currentUser.role,
+      currentUser?.id || 'system',
+      currentUser?.fullName || 'Há»‡ thá»‘ng',
+      currentUser?.role || 'manager',
       'Teacher',
       'ADD_TEACHER',
-      `Tạo tài khoản Giáo viên Quản nhiệm: ${newUser.fullName} (${newUser.teacherCode})`
+      `Táº¡o tÃ i khoáº£n GiÃ¡o viÃªn Quáº£n nhiá»‡m: ${newUser.fullName} (${newUser.teacherCode})`
     );
 
     return newUser;
   },
 
   updateUser(updated: User): void {
+    const prevUser = state.users.find((u) => u.id === updated.id);
     state.users = state.users.map((u) => (u.id === updated.id ? updated : u));
     notifySubscribers();
 
     if (supabase && isSupabaseConfigured) {
+      const { id: _id, ...userPayload } = userToDb(updated);
       supabase
         .from('users')
-        .upsert(userToDb(updated), { onConflict: 'id' })
+        .update(userPayload)
+        .eq('id', updated.id)
         .then(({ error }) => {
-          if (error) console.error('Lỗi khi cập nhật user vào Supabase:', error);
+          if (error) {
+            console.error('[BOPS Update] Lá»—i khi cáº­p nháº­t user vÃ o Supabase:', error);
+            if (prevUser) {
+              state.users = state.users.map((u) => (u.id === updated.id ? prevUser : u));
+              notifySubscribers();
+            }
+          }
         });
     }
 
     const currentUser = BOPSStore.getCurrentUser();
     BOPSStore.addAuditLog(
-      currentUser.id,
-      currentUser.fullName,
-      currentUser.role,
+      currentUser?.id || 'system',
+      currentUser?.fullName || 'Há»‡ thá»‘ng',
+      currentUser?.role || 'manager',
       'Teacher',
       'UPDATE_TEACHER',
-      `Cập nhật hồ sơ tài khoản: ${updated.fullName} (${updated.teacherCode})`
+      `Cáº­p nháº­t há»“ sÆ¡ tÃ i khoáº£n: ${updated.fullName} (${updated.teacherCode})`
     );
   },
 
-  deleteUser(userId: string): void {
-    state.users = state.users.filter((u) => u.id !== userId);
-    notifySubscribers();
+  async deleteUser(userId: string): Promise<{ success: boolean; error?: string; message?: string }> {
+    // 1. CHẶN BÁO XÓA THÀNH CÔNG GIẢ: Bắt buộc Supabase Client phải sẵn sàng kết nối
+    if (!supabase || !isSupabaseConfigured) {
+      return {
+        success: false,
+        error: 'Chưa cấu hình Supabase Client hoặc không có kết nối cơ sở dữ liệu. Thao tác xóa bị từ chối để bảo đảm an toàn dữ liệu!',
+      };
+    }
 
-    if (supabase && isSupabaseConfigured) {
-      supabase
+    const targetUser = state.users.find((u) => u.id === userId);
+    if (!targetUser) return { success: false, error: 'Không tìm thấy người dùng trong hệ thống!' };
+
+    const currentUser = BOPSStore.getCurrentUser();
+    if (currentUser && (userId === currentUser.id || (targetUser.authUserId && targetUser.authUserId === currentUser.authUserId))) {
+      const msg = 'Không thể xóa tài khoản của chính mình đang đăng nhập!';
+      console.warn('[BOPS Delete]', msg);
+      return { success: false, error: msg };
+    }
+
+    // 2. Sao lưu các bản ghi liên quan hiện tại để phục vụ hoàn tác bù trừ (compensating rollback) nếu gặp lỗi
+    const prevRooms = state.rooms.filter((r) => r.teacherId === userId);
+    const prevStudents = state.students.filter((s) => s.teacherId === userId);
+    const prevSchedules = state.schedules.filter((s) => s.teacherId === userId && s.status === 'scheduled');
+    const prevTasks = state.tasks.filter((t) => t.teacherId === userId && t.status === 'pending');
+
+    const rollbackCompensations = async (): Promise<{ success: boolean; errors: string[] }> => {
+      const errors: string[] = [];
+      try {
+        if (prevRooms.length > 0) {
+          for (const r of prevRooms) {
+            const { error: rbRoomErr } = await supabase
+              .from('rooms')
+              .update({ teacher_id: r.teacherId, teacher_name: r.teacherName })
+              .eq('id', r.id);
+            if (rbRoomErr) {
+              errors.push(`Khôi phục phòng ${r.roomName || r.id} thất bại: ${rbRoomErr.message}`);
+            }
+          }
+        }
+        if (prevStudents.length > 0) {
+          for (const s of prevStudents) {
+            const { error: rbStudentErr } = await supabase
+              .from('students')
+              .update({ teacher_id: s.teacherId, teacher_name: s.teacherName })
+              .eq('id', s.id);
+            if (rbStudentErr) {
+              errors.push(`Khôi phục học sinh ${s.fullName || s.id} thất bại: ${rbStudentErr.message}`);
+            }
+          }
+        }
+        if (prevSchedules.length > 0) {
+          for (const sc of prevSchedules) {
+            const { error: rbScheduleErr } = await supabase
+              .from('schedules')
+              .update({
+                teacher_id: sc.teacherId,
+                teacher_name: sc.teacherName,
+                teacher_code: sc.teacherCode || '',
+              })
+              .eq('id', sc.id);
+            if (rbScheduleErr) {
+              errors.push(`Khôi phục ca trực ${sc.date} (${sc.shift}) thất bại: ${rbScheduleErr.message}`);
+            }
+          }
+        }
+        if (prevTasks.length > 0) {
+          for (const tk of prevTasks) {
+            const { error: rbTaskErr } = await supabase
+              .from('tasks')
+              .update({
+                teacher_id: tk.teacherId,
+                teacher_name: tk.teacherName,
+              })
+              .eq('id', tk.id);
+            if (rbTaskErr) {
+              errors.push(`Khôi phục nhiệm vụ ${tk.taskName || tk.id} thất bại: ${rbTaskErr.message}`);
+            }
+          }
+        }
+      } catch (rollbackErr: any) {
+        console.error('[BOPS Delete] Lỗi ngoại lệ khi thực hiện hoàn tác bù trừ (rollback):', rollbackErr);
+        errors.push(`Lỗi ngoại lệ khi rollback: ${rollbackErr?.message || String(rollbackErr)}`);
+      }
+
+      if (errors.length > 0) {
+        console.error('[BOPS Delete] Hoàn tác bù trừ (rollback) có lỗi:', errors);
+      }
+      return { success: errors.length === 0, errors };
+    };
+
+    const formatRollbackNotice = (rb: { success: boolean; errors: string[] }): string => {
+      if (rb.success) {
+        return 'Đã khôi phục các phân công liên quan về trạng thái ban đầu.';
+      }
+      return `CẢNH BÁO: Quá trình hoàn tác bù trừ (rollback) gặp lỗi ở một số bước: [${rb.errors.join('; ')}]. Cần kiểm tra lại dữ liệu phân công!`;
+    };
+let syncWarning: string | undefined;
+    try {
+      // BƯỚC 1: Gỡ phân công phòng trên Supabase
+      if (prevRooms.length > 0) {
+        const { error: roomUnassignErr } = await supabase
+          .from('rooms')
+          .update({ teacher_id: '', teacher_name: 'Chưa phân công' })
+          .eq('teacher_id', userId);
+
+        if (roomUnassignErr) {
+          console.error('[BOPS Delete] Lỗi khi gỡ phân công phòng:', roomUnassignErr);
+          return {
+            success: false,
+            error: `Không thể gỡ phân công phòng của giáo viên: ${roomUnassignErr.message}. Thao tác xóa đã dừng để bảo vệ tính nhất quán dữ liệu.`,
+          };
+        }
+      }
+
+      // BƯỚC 2: Gỡ phân công học sinh trên Supabase
+      if (prevStudents.length > 0) {
+        const { error: studentUnassignErr } = await supabase
+          .from('students')
+          .update({ teacher_id: '', teacher_name: 'Chưa phân công' })
+          .eq('teacher_id', userId);
+
+        if (studentUnassignErr) {
+          console.error('[BOPS Delete] Lỗi khi gỡ phân công học sinh:', studentUnassignErr);
+          const rb = await rollbackCompensations();
+          return {
+            success: false,
+            error: `Không thể gỡ phân công học sinh: ${studentUnassignErr.message}. ${formatRollbackNotice(rb)}`,
+          };
+        }
+      }
+
+      // BƯỚC 3: Gỡ phân công ca trực chưa diễn ra (status = 'scheduled') trên Supabase (giữ nguyên lịch sử ca trực đã xong)
+      if (prevSchedules.length > 0) {
+        const { error: scheduleUnassignErr } = await supabase
+          .from('schedules')
+          .update({ teacher_id: '', teacher_name: 'Chưa phân công', teacher_code: '' })
+          .eq('teacher_id', userId)
+          .eq('status', 'scheduled');
+
+        if (scheduleUnassignErr) {
+          console.error('[BOPS Delete] Lỗi khi gỡ phân công ca trực tương lai:', scheduleUnassignErr);
+          const rb = await rollbackCompensations();
+          return {
+            success: false,
+            error: `Không thể gỡ phân công lịch trực chưa diễn ra: ${scheduleUnassignErr.message}. ${formatRollbackNotice(rb)}`,
+          };
+        }
+      }
+
+      // BƯỚC 4: Gỡ phân công nhiệm vụ chưa hoàn thành (status = 'pending') trên Supabase (giữ nguyên lịch sử nhiệm vụ đã làm)
+      if (prevTasks.length > 0) {
+        const { error: taskUnassignErr } = await supabase
+          .from('tasks')
+          .update({ teacher_id: '', teacher_name: 'Chưa phân công' })
+          .eq('teacher_id', userId)
+          .eq('status', 'pending');
+
+        if (taskUnassignErr) {
+          console.error('[BOPS Delete] Lỗi khi gỡ phân công nhiệm vụ chưa làm:', taskUnassignErr);
+          const rb = await rollbackCompensations();
+          return {
+            success: false,
+            error: `Không thể gỡ phân công nhiệm vụ chưa hoàn thành: ${taskUnassignErr.message}. ${formatRollbackNotice(rb)}`,
+          };
+        }
+      }
+
+      // BƯỚC 5: Xóa tài khoản giáo viên trong public.users trên Supabase và xác minh phản hồi
+      const { data: deletedRows, error: deleteErr } = await supabase
         .from('users')
         .delete()
         .eq('id', userId)
-        .then(({ error }) => {
-          if (error) console.error('Lỗi khi xóa user khỏi Supabase:', error);
-        });
+        .select('id');
+
+      if (deleteErr) {
+        console.error('[BOPS Delete] Lỗi khi xóa user khỏi Supabase:', deleteErr);
+        const rb = await rollbackCompensations();
+        return {
+          success: false,
+          error: `Lỗi Supabase khi xóa tài khoản: ${deleteErr.message}. ${formatRollbackNotice(rb)}`,
+        };
+      }
+
+      if (!deletedRows || deletedRows.length === 0) {
+        console.warn('[BOPS Delete] Supabase phản hồi 0 dòng bị xóa đối với user:', userId);
+        const { data: checkUser, error: checkUserErr } = await supabase
+          .from('users')
+          .select('id')
+          .eq('id', userId)
+          .maybeSingle();
+
+        if (checkUserErr) {
+          console.error('[BOPS Delete] Lỗi khi truy vấn xác minh sự tồn tại của user sau lệnh DELETE:', checkUserErr);
+          const rb = await rollbackCompensations();
+          return {
+            success: false,
+            error: `Lệnh xóa trả về 0 dòng và không thể xác minh sự tồn tại của tài khoản do lỗi: ${checkUserErr.message}. ${formatRollbackNotice(rb)}`,
+          };
+        }
+
+        if (checkUser) {
+          console.error('[BOPS Delete] Tài khoản vẫn tồn tại trên Supabase dù lệnh delete không báo lỗi (chính sách RLS đã chặn DELETE):', userId);
+          const rb = await rollbackCompensations();
+          return {
+            success: false,
+            error: `Xóa không thành công: Tài khoản vẫn còn tồn tại trên cơ sở dữ liệu Supabase (chính sách bảo mật RLS đã từ chối thao tác xóa)! ${formatRollbackNotice(rb)}`,
+          };
+        }
+
+        // Đã xác minh chắc chắn checkUser === null: tài khoản không còn tồn tại trên Supabase
+        console.info('[BOPS Delete] Xác nhận tài khoản đã không còn trên Supabase. Đang tải lại danh sách users...', userId);
+        const { data: freshUsers, error: freshUsersErr } = await supabase
+          .from('users')
+          .select(USERS_SELECT_FIELDS)
+          .order('id', { ascending: true });
+
+        if (freshUsersErr) {
+  console.warn(
+    '[BOPS Delete] Tài khoản đã được xóa trên Supabase nhưng tải lại danh sách users thất bại:',
+    freshUsersErr
+  );
+  syncWarning = `Tài khoản đã được xóa trên Supabase nhưng không thể tải lại danh sách người dùng: ${freshUsersErr.message}. Vui lòng tải lại trang (F5) để đồng bộ!`;
+} else if (freshUsers) {
+  state.users = freshUsers.map(dbToUser);
+}
+      }
+    } catch (err: any) {
+      console.error('[BOPS Delete] Exception khi thực hiện chuỗi thao tác xóa user:', err);
+      const rb = await rollbackCompensations();
+      return {
+        success: false,
+        error: `Lỗi ngoại lệ khi xóa tài khoản: ${err?.message || String(err)}. ${formatRollbackNotice(rb)}`,
+      };
     }
 
-    const currentUser = BOPSStore.getCurrentUser();
+    // 3. CHỈ CẬP NHẬT TRẠNG THÁI RAM SAU KHI TẤT CẢ CÁC BƯỚC TRÊN SUPABASE HOÀN TẤT THÀNH CÔNG
+    state.users = state.users.filter((u) => u.id !== userId);
+    state.rooms = state.rooms.map((r) =>
+      r.teacherId === userId ? { ...r, teacherId: '', teacherName: 'Chưa phân công' } : r
+    );
+    state.students = state.students.map((s) =>
+      s.teacherId === userId ? { ...s, teacherId: '', teacherName: 'Chưa phân công' } : s
+    );
+    state.schedules = state.schedules.map((s) =>
+      s.teacherId === userId && s.status === 'scheduled'
+        ? { ...s, teacherId: '', teacherName: 'Chưa phân công', teacherCode: '' }
+        : s
+    );
+    state.tasks = state.tasks.map((t) =>
+      t.teacherId === userId && t.status === 'pending'
+        ? { ...t, teacherId: '', teacherName: 'Chưa phân công' }
+        : t
+    );
+    notifySubscribers();
+
     BOPSStore.addAuditLog(
-      currentUser.id,
-      currentUser.fullName,
-      currentUser.role,
+      currentUser?.id || 'system',
+      currentUser?.fullName || 'Hệ thống',
+      currentUser?.role || 'manager',
       'Teacher',
       'DELETE_TEACHER',
-      `Xóa tài khoản Giáo viên ID: ${userId}`
+      `Xóa tài khoản Giáo viên ID: ${userId} (${targetUser.fullName}) và gỡ phân công ${prevRooms.length} phòng, ${prevStudents.length} học sinh, ${prevSchedules.length} ca trực, ${prevTasks.length} nhiệm vụ.`
     );
-  },
 
-  // --------------------------------------------------------------------------
-  // 2. STUDENTS (HỌC SINH NỘI TRÚ TOÀN TRƯỜNG - GHI/ĐỌC TRỰC TIẾP SUPABASE)
+    if (syncWarning) {
+  return { success: true, message: syncWarning };
+}
+
+return { success: true };
+},
+
+    // --------------------------------------------------------------------------
+  // 2. STUDENTS (Há»ŒC SINH Ná»˜I TRÃš TOÃ€N TRÆ¯á»œNG - GHI/Äá»ŒC TRá»°C TIáº¾P SUPABASE)
   // --------------------------------------------------------------------------
   getStudents(): Student[] {
     return state.students;
@@ -1231,7 +1863,7 @@ export const BOPSStore = {
         .from('students')
         .upsert(payload, { onConflict: 'student_code' })
         .then(({ error }) => {
-          if (error) console.error('Lỗi khi lưu học sinh vào Supabase:', error);
+          if (error) console.error('Lá»—i khi lÆ°u há»c sinh vÃ o Supabase:', error);
         });
     }
   },
@@ -1241,8 +1873,8 @@ export const BOPSStore = {
     const newStudent: Student = {
       ...studentData,
       id: studentData.id || `st-${Date.now()}`,
-      uploadedByUserId: studentData.uploadedByUserId || currentUser.id,
-      uploadedByUserName: studentData.uploadedByUserName || currentUser.fullName,
+      uploadedByUserId: studentData.uploadedByUserId || currentUser?.id || 'system',
+      uploadedByUserName: studentData.uploadedByUserName || currentUser?.fullName || 'Há»‡ thá»‘ng',
     };
 
     state.students.unshift(newStudent);
@@ -1251,19 +1883,23 @@ export const BOPSStore = {
     if (supabase && isSupabaseConfigured) {
       supabase
         .from('students')
-        .upsert(studentToDb(newStudent), { onConflict: 'student_code' })
+        .insert(studentToDb(newStudent))
         .then(({ error }) => {
-          if (error) console.error('Lỗi khi thêm học sinh vào Supabase:', error);
+          if (error) {
+            console.error('[BOPS Add] Lá»—i khi thÃªm há»c sinh vÃ o Supabase:', error);
+            state.students = state.students.filter((s) => s.id !== newStudent.id);
+            notifySubscribers();
+          }
         });
     }
 
     BOPSStore.addAuditLog(
-      currentUser.id,
-      currentUser.fullName,
-      currentUser.role,
+      currentUser?.id || 'system',
+      currentUser?.fullName || 'Há»‡ thá»‘ng',
+      currentUser?.role || 'manager',
       'Student',
       'ADD_STUDENT',
-      `Thêm học sinh nội trú mới: ${newStudent.fullName} (${newStudent.studentCode})`
+      `ThÃªm há»c sinh ná»™i trÃº má»›i: ${newStudent.fullName} (${newStudent.studentCode})`
     );
 
     return newStudent;
@@ -1293,27 +1929,27 @@ export const BOPSStore = {
       if (idx >= 0) {
         const existing = updatedList[idx];
 
-        // 1. Giữ nguyên ID hiện tại
+        // 1. Giá»¯ nguyÃªn ID hiá»‡n táº¡i
         const id = existing.id;
 
-        // 2. Họ và tên: Cập nhật nếu hợp lệ, không dùng tên placeholder
+        // 2. Há» vÃ  tÃªn: Cáº­p nháº­t náº¿u há»£p lá»‡, khÃ´ng dÃ¹ng tÃªn placeholder
         const fullName =
-          ns.fullName && ns.fullName.trim() !== '' && !ns.fullName.startsWith('Học sinh ')
+          ns.fullName && ns.fullName.trim() !== '' && !ns.fullName.startsWith('Há»c sinh ')
             ? ns.fullName.trim()
             : existing.fullName;
 
-        // 3. Giới tính
+        // 3. Giá»›i tÃ­nh
         const gender = ns.gender || existing.gender || 'nam';
 
-        // 4. Ngày sinh: Cập nhật nếu có giá trị hợp lệ, nếu trống giữ nguyên ngày sinh cũ
+        // 4. NgÃ y sinh: Cáº­p nháº­t náº¿u cÃ³ giÃ¡ trá»‹ há»£p lá»‡, náº¿u trá»‘ng giá»¯ nguyÃªn ngÃ y sinh cÅ©
         const birthday =
           ns.birthday && ns.birthday.trim() !== '' ? ns.birthday.trim() : existing.birthday;
 
-        // 5. Lớp: Cập nhật nếu có giá trị hợp lệ, nếu trống giữ nguyên lớp cũ
+        // 5. Lá»›p: Cáº­p nháº­t náº¿u cÃ³ giÃ¡ trá»‹ há»£p lá»‡, náº¿u trá»‘ng giá»¯ nguyÃªn lá»›p cÅ©
         const className =
           ns.className && ns.className.trim() !== '' ? ns.className.trim() : existing.className;
 
-        // 6. Phòng KTX & Mã phòng: Cập nhật nếu có, nếu trống giữ nguyên phòng cũ
+        // 6. PhÃ²ng KTX & MÃ£ phÃ²ng: Cáº­p nháº­t náº¿u cÃ³, náº¿u trá»‘ng giá»¯ nguyÃªn phÃ²ng cÅ©
         const roomName =
           ns.roomName && ns.roomName.trim() !== '' ? ns.roomName.trim() : existing.roomName;
         const roomId =
@@ -1321,7 +1957,7 @@ export const BOPSStore = {
             ? ns.roomId.trim()
             : (roomName ? (roomName.startsWith('r-') ? roomName : `r-${roomName}`) : existing.roomId);
 
-        // 7. Giáo viên phụ trách & Mã GV: Cập nhật nếu có, nếu trống giữ nguyên GV cũ
+        // 7. GiÃ¡o viÃªn phá»¥ trÃ¡ch & MÃ£ GV: Cáº­p nháº­t náº¿u cÃ³, náº¿u trá»‘ng giá»¯ nguyÃªn GV cÅ©
         const teacherName =
           ns.teacherName && ns.teacherName.trim() !== ''
             ? ns.teacherName.trim()
@@ -1331,7 +1967,7 @@ export const BOPSStore = {
             ? ns.teacherId.trim()
             : (existing.teacherId || currentUser.id);
 
-        // 8. Thông tin Phụ huynh: Cập nhật nếu có, nếu trống giữ nguyên dữ liệu cũ
+        // 8. ThÃ´ng tin Phá»¥ huynh: Cáº­p nháº­t náº¿u cÃ³, náº¿u trá»‘ng giá»¯ nguyÃªn dá»¯ liá»‡u cÅ©
         const parentName =
           ns.parentName && ns.parentName.trim() !== ''
             ? ns.parentName.trim()
@@ -1341,7 +1977,7 @@ export const BOPSStore = {
             ? ns.parentPhone.trim()
             : existing.parentPhone;
 
-        // 9. Sức khỏe & Ghi chú: Cập nhật nếu có, nếu trống giữ nguyên dữ liệu cũ
+        // 9. Sá»©c khá»e & Ghi chÃº: Cáº­p nháº­t náº¿u cÃ³, náº¿u trá»‘ng giá»¯ nguyÃªn dá»¯ liá»‡u cÅ©
         const healthNote =
           ns.healthNote && ns.healthNote.trim() !== ''
             ? ns.healthNote.trim()
@@ -1349,13 +1985,13 @@ export const BOPSStore = {
         const note =
           ns.note && ns.note.trim() !== '' ? ns.note.trim() : (existing.note || '');
 
-        // 10. Trạng thái học sinh
+        // 10. Tráº¡ng thÃ¡i há»c sinh
         const status = ns.status || existing.status || 'active';
 
-        // 11. Theo dõi đặc biệt & Nhãn theo dõi:
-        // - "Có" -> specialCare = true, cập nhật hoặc giữ nhãn
-        // - "Không" -> specialCare = false, xóa nhãn
-        // - Không có cột hoặc ô trống -> GIỮ NGUYÊN HOÀN TOÀN dữ liệu cũ
+        // 11. Theo dÃµi Ä‘áº·c biá»‡t & NhÃ£n theo dÃµi:
+        // - "CÃ³" -> specialCare = true, cáº­p nháº­t hoáº·c giá»¯ nhÃ£n
+        // - "KhÃ´ng" -> specialCare = false, xÃ³a nhÃ£n
+        // - KhÃ´ng cÃ³ cá»™t hoáº·c Ã´ trá»‘ng -> GIá»® NGUYÃŠN HOÃ€N TOÃ€N dá»¯ liá»‡u cÅ©
         let specialCare = existing.specialCare;
         let specialLabels = existing.specialLabels || [];
 
@@ -1376,7 +2012,7 @@ export const BOPSStore = {
           specialLabels = existing.specialLabels || [];
         }
 
-        // 12. Giữ nguyên lịch sử tương tác và người tải ban đầu của bản ghi cũ
+        // 12. Giá»¯ nguyÃªn lá»‹ch sá»­ tÆ°Æ¡ng tÃ¡c vÃ  ngÆ°á»i táº£i ban Ä‘áº§u cá»§a báº£n ghi cÅ©
         const lastInteractionDate = existing.lastInteractionDate;
         const interactionCountThisMonth = existing.interactionCountThisMonth ?? 0;
         const origUploadedByUserId = existing.uploadedByUserId || defaultUploaderId;
@@ -1414,7 +2050,7 @@ export const BOPSStore = {
         const fresh: Student = {
           id: studentId,
           studentCode: ns.studentCode.trim().toUpperCase(),
-          fullName: ns.fullName?.trim() || `Học sinh ${ns.studentCode}`,
+          fullName: ns.fullName?.trim() || `Há»c sinh ${ns.studentCode}`,
           gender: ns.gender || 'nam',
           birthday: ns.birthday?.trim() || '',
           className: ns.className?.trim() || '10A1',
@@ -1426,7 +2062,7 @@ export const BOPSStore = {
                 ? ns.roomName.trim()
                 : `r-${ns.roomName.trim()}`
               : 'r-DomB-101'),
-          teacherName: ns.teacherName?.trim() || currentUser.fullName || 'Giáo viên Quản nhiệm DomB',
+          teacherName: ns.teacherName?.trim() || currentUser.fullName || 'GiÃ¡o viÃªn Quáº£n nhiá»‡m DomB',
           teacherId: ns.teacherId || currentUser.id || 'u-gv-001',
           parentName: ns.parentName?.trim() || '',
           parentPhone: ns.parentPhone?.trim() || '',
@@ -1449,14 +2085,14 @@ export const BOPSStore = {
     state.students = updatedList;
     notifySubscribers();
 
-    // Đồng bộ lập tức sang Supabase PostgreSQL
+    // Äá»“ng bá»™ láº­p tá»©c sang Supabase PostgreSQL
     if (supabase && isSupabaseConfigured && recordsToSync.length > 0) {
       const payload = recordsToSync.map(studentToDb);
       supabase
         .from('students')
         .upsert(payload, { onConflict: 'student_code' })
         .then(({ error }) => {
-          if (error) console.error('Lỗi khi import học sinh vào Supabase:', error);
+          if (error) console.error('Lá»—i khi import há»c sinh vÃ o Supabase:', error);
         });
     }
 
@@ -1466,13 +2102,13 @@ export const BOPSStore = {
       currentUser.role,
       'Student',
       'IMPORT_EXCEL',
-      `Nhập danh sách học sinh từ file Excel: Thêm mới ${added} HS, cập nhật an toàn ${updated} HS trùng mã.`
+      `Nháº­p danh sÃ¡ch há»c sinh tá»« file Excel: ThÃªm má»›i ${added} HS, cáº­p nháº­t an toÃ n ${updated} HS trÃ¹ng mÃ£.`
     );
 
     BOPSStore.addNotification({
       receiverId: currentUser.id,
-      title: 'Nhập học sinh từ Excel thành công',
-      content: `Đã xử lý danh sách học sinh: Thêm mới ${added} em, Cập nhật bảo toàn dữ liệu ${updated} em vào Supabase PostgreSQL.`,
+      title: 'Nháº­p há»c sinh tá»« Excel thÃ nh cÃ´ng',
+      content: `ÄÃ£ xá»­ lÃ½ danh sÃ¡ch há»c sinh: ThÃªm má»›i ${added} em, Cáº­p nháº­t báº£o toÃ n dá»¯ liá»‡u ${updated} em vÃ o Supabase PostgreSQL.`,
       type: 'system',
       priority: 'medium',
     });
@@ -1481,41 +2117,89 @@ export const BOPSStore = {
   },
 
   updateStudent(student: Student): void {
+    const prevStudent = state.students.find((s) => s.id === student.id);
     state.students = state.students.map((s) => (s.id === student.id ? student : s));
     notifySubscribers();
 
     if (supabase && isSupabaseConfigured) {
+      const currentUser = BOPSStore.getCurrentUser();
+      const isManager = currentUser?.role === 'manager';
+
+      let payload: Record<string, any>;
+      if (isManager) {
+        const { id: _id, ...managerPayload } = studentToDb(student);
+        payload = managerPayload;
+      } else {
+        // Whitelist trÆ°á»ng Ä‘Æ°á»£c phÃ©p cho GVQN theo SQL RLS FSC3:
+        // special_care, special_labels, health_note, note, last_interaction_date, interaction_count_this_month, updated_at
+        payload = {
+          special_care: Boolean(student.specialCare),
+          special_labels: student.specialLabels || [],
+          health_note: student.healthNote || null,
+          note: student.note || null,
+          last_interaction_date: student.lastInteractionDate || null,
+          interaction_count_this_month: student.interactionCountThisMonth || 0,
+          updated_at: new Date().toISOString(),
+        };
+      }
+
       supabase
         .from('students')
-        .upsert(studentToDb(student), { onConflict: 'id' })
+        .update(payload)
+        .eq('id', student.id)
         .then(({ error }) => {
-          if (error) console.error('Lỗi khi cập nhật học sinh trong Supabase:', error);
+          if (error) {
+            console.error('[BOPS Update] Lá»—i khi cáº­p nháº­t há»c sinh trong Supabase:', error);
+            if (prevStudent) {
+              state.students = state.students.map((s) => (s.id === student.id ? prevStudent : s));
+              notifySubscribers();
+            }
+          }
         });
     }
 
     const currentUser = BOPSStore.getCurrentUser();
     BOPSStore.addAuditLog(
-      currentUser.id,
-      currentUser.fullName,
-      currentUser.role,
+      currentUser?.id || 'system',
+      currentUser?.fullName || 'Há»‡ thá»‘ng',
+      currentUser?.role || 'manager',
       'Student',
       'UPDATE_STUDENT',
-      `Cập nhật hồ sơ học sinh ${student.fullName} (${student.studentCode})`
+      `Cáº­p nháº­t há»“ sÆ¡ há»c sinh ${student.fullName} (${student.studentCode})`
     );
   },
 
-  deleteStudent(studentId: string): void {
+  async deleteStudent(studentId: string): Promise<{ success: boolean; error?: string }> {
+    const targetStudent = state.students.find((s) => s.id === studentId);
+    if (!targetStudent) return { success: false, error: 'KhÃ´ng tÃ¬m tháº¥y há»c sinh' };
+
+    // XÃ³a táº¡m thá»i trÃªn RAM
     state.students = state.students.filter((s) => s.id !== studentId);
     notifySubscribers();
 
     if (supabase && isSupabaseConfigured) {
-      supabase
-        .from('students')
-        .delete()
-        .eq('id', studentId)
-        .then(({ error }) => {
-          if (error) console.error('Lỗi khi xóa học sinh trên Supabase:', error);
-        });
+      try {
+        const { error } = await supabase
+          .from('students')
+          .delete()
+          .eq('id', studentId);
+
+        if (error) {
+          console.error('[BOPS Delete] Lá»—i khi xÃ³a há»c sinh trÃªn Supabase:', error);
+          if (!state.students.some((s) => s.id === studentId)) {
+            state.students.push(targetStudent);
+            notifySubscribers();
+          }
+          return { success: false, error: error.message };
+        }
+      } catch (err: any) {
+        console.error('[BOPS Delete] Exception khi xÃ³a há»c sinh trÃªn Supabase:', err);
+        if (!state.students.some((s) => s.id === studentId)) {
+          state.students.push(targetStudent);
+          notifySubscribers();
+        }
+        return { success: false, error: err?.message || 'Lá»—i káº¿t ná»‘i khi xÃ³a' };
+      }
     }
 
     const currentUser = BOPSStore.getCurrentUser();
@@ -1525,8 +2209,10 @@ export const BOPSStore = {
       currentUser.role,
       'Student',
       'DELETE_STUDENT',
-      `Xóa hồ sơ học sinh ID: ${studentId}`
+      `XÃ³a há»“ sÆ¡ há»c sinh: ${targetStudent.fullName} (${targetStudent.studentCode})`
     );
+
+    return { success: true };
   },
 
   // --------------------------------------------------------------------------
@@ -1546,7 +2232,7 @@ export const BOPSStore = {
         .from('positions')
         .upsert(payload, { onConflict: 'id' })
         .then(({ error }) => {
-          if (error) console.error('Lỗi khi lưu vị trí trực vào Supabase:', error);
+          if (error) console.error('Lá»—i khi lÆ°u vá»‹ trÃ­ trá»±c vÃ o Supabase:', error);
         });
     }
   },
@@ -1562,9 +2248,13 @@ export const BOPSStore = {
     if (supabase && isSupabaseConfigured) {
       supabase
         .from('positions')
-        .upsert(positionToDb(newPosition), { onConflict: 'id' })
+        .insert(positionToDb(newPosition))
         .then(({ error }) => {
-          if (error) console.error('Lỗi khi thêm vị trí trực vào Supabase:', error);
+          if (error) {
+            console.error('[BOPS Add] Lá»—i khi thÃªm vá»‹ trÃ­ trá»±c vÃ o Supabase:', error);
+            state.positions = state.positions.filter((p) => p.id !== newPosition.id);
+            notifySubscribers();
+          }
         });
     }
 
@@ -1572,36 +2262,65 @@ export const BOPSStore = {
   },
 
   updatePosition(updatedPosition: Position): void {
+    const prevPos = state.positions.find((p) => p.id === updatedPosition.id);
     state.positions = state.positions.map((p) => (p.id === updatedPosition.id ? updatedPosition : p));
     notifySubscribers();
 
     if (supabase && isSupabaseConfigured) {
+      const { id: _id, ...posPayload } = positionToDb(updatedPosition);
       supabase
         .from('positions')
-        .upsert(positionToDb(updatedPosition), { onConflict: 'id' })
+        .update(posPayload)
+        .eq('id', updatedPosition.id)
         .then(({ error }) => {
-          if (error) console.error('Lỗi khi cập nhật vị trí trực vào Supabase:', error);
+          if (error) {
+            console.error('[BOPS Update] Lá»—i khi cáº­p nháº­t vá»‹ trÃ­ trá»±c vÃ o Supabase:', error);
+            if (prevPos) {
+              state.positions = state.positions.map((p) => (p.id === updatedPosition.id ? prevPos : p));
+              notifySubscribers();
+            }
+          }
         });
     }
   },
 
-  deletePosition(positionId: string): void {
+  async deletePosition(positionId: string): Promise<{ success: boolean; error?: string }> {
+    const targetPos = state.positions.find((p) => p.id === positionId);
+    if (!targetPos) return { success: false, error: 'KhÃ´ng tÃ¬m tháº¥y vá»‹ trÃ­ trá»±c' };
+
     state.positions = state.positions.filter((p) => p.id !== positionId);
     notifySubscribers();
 
     if (supabase && isSupabaseConfigured) {
-      supabase
-        .from('positions')
-        .delete()
-        .eq('id', positionId)
-        .then(({ error }) => {
-          if (error) console.error('Lỗi khi xóa vị trí trực khỏi Supabase:', error);
-        });
+      try {
+        const { error } = await supabase
+          .from('positions')
+          .delete()
+          .eq('id', positionId);
+
+        if (error) {
+          console.error('[BOPS Delete] Lá»—i khi xÃ³a vá»‹ trÃ­ trá»±c khá»i Supabase:', error);
+          if (!state.positions.some((p) => p.id === positionId)) {
+            state.positions.push(targetPos);
+            notifySubscribers();
+          }
+          return { success: false, error: error.message };
+        }
+      } catch (err: any) {
+        console.error('[BOPS Delete] Exception khi xÃ³a vá»‹ trÃ­ trá»±c:', err);
+        if (!state.positions.some((p) => p.id === positionId)) {
+          state.positions.push(targetPos);
+          notifySubscribers();
+        }
+        return { success: false, error: err?.message || 'Lá»—i máº¡ng khi xÃ³a' };
+      }
     }
+
+    return { success: true };
   },
 
   // --------------------------------------------------------------------------
-  // 4. ROOMS (PHÒNG KTX - SỨC CHỨA ĐẾN 30 HS)
+  // 4. ROOMS (PHÃ’NG KTX - Sá»¨C CHá»¨A Äáº¾N 30 HS)
   // --------------------------------------------------------------------------
   getRooms(): Room[] {
     return state.rooms;
@@ -1617,7 +2336,7 @@ export const BOPSStore = {
         .from('rooms')
         .upsert(payload, { onConflict: 'id' })
         .then(({ error }) => {
-          if (error) console.error('Lỗi khi lưu phòng vào Supabase:', error);
+          if (error) console.error('Lá»—i khi lÆ°u phÃ²ng vÃ o Supabase:', error);
         });
     }
   },
@@ -1633,61 +2352,100 @@ export const BOPSStore = {
     if (supabase && isSupabaseConfigured) {
       supabase
         .from('rooms')
-        .upsert(roomToDb(newRoom), { onConflict: 'id' })
+        .insert(roomToDb(newRoom))
         .then(({ error }) => {
-          if (error) console.error('Lỗi khi thêm phòng vào Supabase:', error);
+          if (error) {
+            console.error('[BOPS Add] Lá»—i khi thÃªm phÃ²ng vÃ o Supabase:', error);
+            state.rooms = state.rooms.filter((r) => r.id !== newRoom.id);
+            notifySubscribers();
+          }
         });
     }
 
     const currentUser = BOPSStore.getCurrentUser();
     BOPSStore.addAuditLog(
-      currentUser.id,
-      currentUser.fullName,
-      currentUser.role,
+      currentUser?.id || 'system',
+      currentUser?.fullName || 'Há»‡ thá»‘ng',
+      currentUser?.role || 'manager',
       'Room',
       'ADD_ROOM',
-      `Khai báo phòng KTX mới: ${newRoom.roomName} (${newRoom.building}) - Sức chứa: ${newRoom.capacity} HS`
+      `Khai bÃ¡o phÃ²ng KTX má»›i: ${newRoom.roomName} (${newRoom.building}) - Sá»©c chá»©a: ${newRoom.capacity} HS`
     );
 
     return newRoom;
   },
 
   updateRoom(room: Room): void {
+    const prevRoom = state.rooms.find((r) => r.id === room.id);
     state.rooms = state.rooms.map((r) => (r.id === room.id ? room : r));
     notifySubscribers();
 
     if (supabase && isSupabaseConfigured) {
+      const { id: _id, ...roomPayload } = roomToDb(room);
       supabase
         .from('rooms')
-        .upsert(roomToDb(room), { onConflict: 'id' })
+        .update(roomPayload)
+        .eq('id', room.id)
         .then(({ error }) => {
-          if (error) console.error('Lỗi khi cập nhật phòng trong Supabase:', error);
+          if (error) {
+            console.error('[BOPS Update] Lá»—i khi cáº­p nháº­t phÃ²ng trong Supabase:', error);
+            if (prevRoom) {
+              state.rooms = state.rooms.map((r) => (r.id === room.id ? prevRoom : r));
+              notifySubscribers();
+            }
+          }
         });
     }
 
     const currentUser = BOPSStore.getCurrentUser();
     BOPSStore.addAuditLog(
-      currentUser.id,
-      currentUser.fullName,
-      currentUser.role,
+      currentUser?.id || 'system',
+      currentUser?.fullName || 'Há»‡ thá»‘ng',
+      currentUser?.role || 'manager',
       'Room',
       'UPDATE_ROOM',
-      `Cập nhật phòng KTX ${room.roomName} (Sức chứa: ${room.capacity})`
+      `Cáº­p nháº­t phÃ²ng KTX ${room.roomName} (Sá»©c chá»©a: ${room.capacity})`
     );
   },
 
-  deleteRoom(roomId: string): void {
+  async deleteRoom(roomId: string): Promise<{ success: boolean; error?: string }> {
+    const targetRoom = state.rooms.find((r) => r.id === roomId);
+    if (!targetRoom) return { success: false, error: 'KhÃ´ng tÃ¬m tháº¥y phÃ²ng' };
+
+    // Kiá»ƒm tra xem phÃ²ng cÃ³ há»c sinh Ä‘ang á»Ÿ khÃ´ng
+    const studentsInRoom = state.students.filter((s) => s.roomId === roomId || s.roomName === targetRoom.roomName);
+    if (studentsInRoom.length > 0) {
+      const msg = `PhÃ²ng ${targetRoom.roomName} Ä‘ang cÃ³ ${studentsInRoom.length} há»c sinh. Vui lÃ²ng chuyá»ƒn há»c sinh sang phÃ²ng khÃ¡c trÆ°á»›c khi xÃ³a!`;
+      console.warn('[BOPS Delete]', msg);
+      return { success: false, error: msg };
+    }
+
     state.rooms = state.rooms.filter((r) => r.id !== roomId);
     notifySubscribers();
 
     if (supabase && isSupabaseConfigured) {
-      supabase
-        .from('rooms')
-        .delete()
-        .eq('id', roomId)
-        .then(({ error }) => {
-          if (error) console.error('Lỗi khi xóa phòng trên Supabase:', error);
-        });
+      try {
+        const { error } = await supabase
+          .from('rooms')
+          .delete()
+          .eq('id', roomId);
+
+        if (error) {
+          console.error('[BOPS Delete] Lá»—i khi xÃ³a phÃ²ng trÃªn Supabase:', error);
+          if (!state.rooms.some((r) => r.id === roomId)) {
+            state.rooms.push(targetRoom);
+            notifySubscribers();
+          }
+          return { success: false, error: error.message };
+        }
+      } catch (err: any) {
+        console.error('[BOPS Delete] Exception khi xÃ³a phÃ²ng trÃªn Supabase:', err);
+        if (!state.rooms.some((r) => r.id === roomId)) {
+          state.rooms.push(targetRoom);
+          notifySubscribers();
+        }
+        return { success: false, error: err?.message || 'Lá»—i káº¿t ná»‘i khi xÃ³a' };
+      }
     }
 
     const currentUser = BOPSStore.getCurrentUser();
@@ -1697,8 +2455,10 @@ export const BOPSStore = {
       currentUser.role,
       'Room',
       'DELETE_ROOM',
-      `Xóa phòng KTX ID: ${roomId}`
+      `XÃ³a phÃ²ng KTX: ${targetRoom.roomName} (${targetRoom.building})`
     );
+
+    return { success: true };
   },
 
   updateRoomHygiene(
@@ -1717,10 +2477,23 @@ export const BOPSStore = {
           correctionNote: note,
         };
         if (supabase && isSupabaseConfigured) {
+          // Whitelist an toÃ n theo SQL RLS FSC3:
+          // Chá»‰ sá»­a status, hygiene_status, last_inspected_at, correction_note
+          // Tuyá»‡t Ä‘á»‘i khÃ´ng thay Ä‘á»•i capacity, room_name, building, floor, occupied
+          const hygienePayload = {
+            status,
+            hygiene_status: hygieneStatus,
+            last_inspected_at: updated.lastInspectedAt,
+            correction_note: note || null,
+          };
+
           supabase
             .from('rooms')
-            .upsert(roomToDb(updated), { onConflict: 'id' })
-            .then();
+            .update(hygienePayload)
+            .eq('id', roomId)
+            .then(({ error }) => {
+              if (error) console.error('Lá»—i khi cáº­p nháº­t vá»‡ sinh phÃ²ng:', error);
+            });
         }
         return updated;
       }
@@ -1730,7 +2503,7 @@ export const BOPSStore = {
   },
 
   // --------------------------------------------------------------------------
-  // 5. SCHEDULES (LỊCH TRỰC QUẢN NHIỆM)
+  // 5. SCHEDULES (Lá»ŠCH TRá»°C QUáº¢N NHIá»†M)
   // --------------------------------------------------------------------------
   getSchedules(): ScheduleAssignment[] {
     return state.schedules;
@@ -1746,7 +2519,7 @@ export const BOPSStore = {
         .from('schedules')
         .upsert(payload, { onConflict: 'id' })
         .then(({ error }) => {
-          if (error) console.error('Lỗi khi lưu lịch trực vào Supabase:', error);
+          if (error) console.error('Lá»—i khi lÆ°u lá»‹ch trá»±c vÃ o Supabase:', error);
         });
     }
   },
@@ -1762,70 +2535,147 @@ export const BOPSStore = {
     if (supabase && isSupabaseConfigured) {
       supabase
         .from('schedules')
-        .upsert(scheduleToDb(newSchedule), { onConflict: 'id' })
-        .then();
+        .insert(scheduleToDb(newSchedule))
+        .then(({ error }) => {
+          if (error) {
+            console.error('[BOPS Add] Lá»—i khi thÃªm ca trá»±c vÃ o Supabase:', error);
+            state.schedules = state.schedules.filter((s) => s.id !== newSchedule.id);
+            notifySubscribers();
+          }
+        });
     }
 
     const currentUser = BOPSStore.getCurrentUser();
     BOPSStore.addAuditLog(
-      currentUser.id,
-      currentUser.fullName,
-      currentUser.role,
+      currentUser?.id || 'system',
+      currentUser?.fullName || 'Há»‡ thá»‘ng',
+      currentUser?.role || 'manager',
       'Schedule',
       'ADD_SCHEDULE',
-      `Phân công ca trực mới ngày ${newSchedule.date} cho GV ${newSchedule.teacherName}`
+      `PhÃ¢n cÃ´ng ca trá»±c má»›i ngÃ y ${newSchedule.date} cho GV ${newSchedule.teacherName}`
     );
 
     return newSchedule;
   },
 
+  addSchedules(newSchedules: ScheduleAssignment[]): void {
+    if (newSchedules.length === 0) return;
+    state.schedules = [...newSchedules, ...state.schedules];
+    notifySubscribers();
+
+    if (supabase && isSupabaseConfigured) {
+      const payload = newSchedules.map(scheduleToDb);
+      supabase
+        .from('schedules')
+        .insert(payload)
+        .then(({ error }) => {
+          if (error) {
+            console.error('[BOPS Add] Lá»—i khi thÃªm nhiá»u ca trá»±c vÃ o Supabase:', error);
+            const newIds = new Set(newSchedules.map((s) => s.id));
+            state.schedules = state.schedules.filter((s) => !newIds.has(s.id));
+            notifySubscribers();
+          }
+        });
+    }
+  },
+
   updateSchedule(schedule: ScheduleAssignment): void {
+    const prevSchedule = state.schedules.find((s) => s.id === schedule.id);
     state.schedules = state.schedules.map((s) => (s.id === schedule.id ? schedule : s));
     notifySubscribers();
 
     if (supabase && isSupabaseConfigured) {
+      const currentUser = BOPSStore.getCurrentUser();
+      const isManager = currentUser?.role === 'manager';
+
+      let payload: Record<string, any>;
+      if (isManager) {
+        const { id: _id, ...managerPayload } = scheduleToDb(schedule);
+        payload = managerPayload;
+      } else {
+        // Theo SQL RLS FSC3: GVQN chá»‰ Ä‘Æ°á»£c cáº­p nháº­t Ä‘á» xuáº¥t Ä‘á»•i ca:
+        // status = 'swapped', swap_with_teacher_id (báº¯t buá»™c khi Ä‘á»•i ca), swap_note
+        // Tuyá»‡t Ä‘á»‘i khÃ´ng cho GVQN sá»­a date, shift, teacher_id, evaluation_status, etc.
+        payload = {
+          status: schedule.status,
+          swap_with_teacher_id: schedule.swapWithTeacherId || null,
+          swap_note: schedule.swapNote || null,
+        };
+      }
+
       supabase
         .from('schedules')
-        .upsert(scheduleToDb(schedule), { onConflict: 'id' })
-        .then();
+        .update(payload)
+        .eq('id', schedule.id)
+        .then(({ error }) => {
+          if (error) {
+            console.error('[BOPS Update] Lá»—i khi cáº­p nháº­t ca trá»±c:', error);
+            if (prevSchedule) {
+              state.schedules = state.schedules.map((s) => (s.id === schedule.id ? prevSchedule : s));
+              notifySubscribers();
+            }
+          }
+        });
     }
 
     const currentUser = BOPSStore.getCurrentUser();
     BOPSStore.addAuditLog(
-      currentUser.id,
-      currentUser.fullName,
-      currentUser.role,
+      currentUser?.id || 'system',
+      currentUser?.fullName || 'Há»‡ thá»‘ng',
+      currentUser?.role || 'manager',
       'Schedule',
       'UPDATE_SCHEDULE',
-      `Cập nhật ca trực ID: ${schedule.id} ngày ${schedule.date}`
+      `Cáº­p nháº­t ca trá»±c ID: ${schedule.id} ngÃ y ${schedule.date}`
     );
   },
 
-  deleteSchedule(scheduleId: string): void {
+  async deleteSchedule(scheduleId: string): Promise<{ success: boolean; error?: string }> {
+    const target = state.schedules.find((s) => s.id === scheduleId);
+    if (!target) return { success: false, error: 'KhÃ´ng tÃ¬m tháº¥y ca trá»±c' };
+
     state.schedules = state.schedules.filter((s) => s.id !== scheduleId);
     notifySubscribers();
 
     if (supabase && isSupabaseConfigured) {
-      supabase
-        .from('schedules')
-        .delete()
-        .eq('id', scheduleId)
-        .then();
+      try {
+        const { error } = await supabase
+          .from('schedules')
+          .delete()
+          .eq('id', scheduleId);
+
+        if (error) {
+          console.error('[BOPS Delete] Lá»—i khi xÃ³a ca trá»±c trÃªn Supabase:', error);
+          if (!state.schedules.some((s) => s.id === scheduleId)) {
+            state.schedules.push(target);
+            notifySubscribers();
+          }
+          return { success: false, error: error.message };
+        }
+      } catch (err: any) {
+        console.error('[BOPS Delete] Exception khi xÃ³a ca trá»±c:', err);
+        if (!state.schedules.some((s) => s.id === scheduleId)) {
+          state.schedules.push(target);
+          notifySubscribers();
+        }
+        return { success: false, error: err?.message || 'Lá»—i máº¡ng khi xÃ³a' };
+      }
     }
 
     const currentUser = BOPSStore.getCurrentUser();
     BOPSStore.addAuditLog(
-      currentUser.id,
-      currentUser.fullName,
-      currentUser.role,
+      currentUser?.id || 'system',
+      currentUser?.fullName || 'Há»‡ thá»‘ng',
+      currentUser?.role || 'manager',
       'Schedule',
       'DELETE_SCHEDULE',
-      `Xóa ca trực ID: ${scheduleId}`
+      `XÃ³a ca trá»±c ID: ${scheduleId}`
     );
+
+    return { success: true };
   },
 
   // --------------------------------------------------------------------------
-  // 6. TASKS (NHIỆM VỤ / CHECKLIST CA TRỰC)
+  // 6. TASKS (NHIá»†M Vá»¤ / CHECKLIST CA TRá»°C)
   // --------------------------------------------------------------------------
   getTasks(): TaskInstance[] {
     return state.tasks;
@@ -1855,66 +2705,105 @@ export const BOPSStore = {
     if (supabase && isSupabaseConfigured) {
       supabase
         .from('tasks')
-        .upsert(taskToDb(newTask), { onConflict: 'id' })
-        .then();
+        .insert(taskToDb(newTask))
+        .then(({ error }) => {
+          if (error) {
+            console.error('[BOPS Add] Lá»—i khi thÃªm nhiá»‡m vá»¥ vÃ o Supabase:', error);
+            state.tasks = state.tasks.filter((t) => t.id !== newTask.id);
+            notifySubscribers();
+          }
+        });
     }
 
     const currentUser = BOPSStore.getCurrentUser();
     BOPSStore.addAuditLog(
-      currentUser.id,
-      currentUser.fullName,
-      currentUser.role,
+      currentUser?.id || 'system',
+      currentUser?.fullName || 'Há»‡ thá»‘ng',
+      currentUser?.role || 'manager',
       'Task',
       'ADD_TASK',
-      `Giao nhiệm vụ: "${newTask.title || newTask.taskName}" cho GV ${newTask.teacherName}`
+      `Giao nhiá»‡m vá»¥: "${newTask.title || newTask.taskName}" cho GV ${newTask.teacherName}`
     );
 
     return newTask;
   },
 
   updateTask(updatedTask: TaskInstance): void {
+    const prevTask = state.tasks.find((t) => t.id === updatedTask.id);
     state.tasks = state.tasks.map((t) => (t.id === updatedTask.id ? updatedTask : t));
     notifySubscribers();
 
     if (supabase && isSupabaseConfigured) {
+      const { id: _id, ...taskPayload } = taskToDb(updatedTask);
       supabase
         .from('tasks')
-        .upsert(taskToDb(updatedTask), { onConflict: 'id' })
-        .then();
+        .update(taskPayload)
+        .eq('id', updatedTask.id)
+        .then(({ error }) => {
+          if (error) {
+            console.error('[BOPS Update] Lá»—i khi cáº­p nháº­t nhiá»‡m vá»¥:', error);
+            if (prevTask) {
+              state.tasks = state.tasks.map((t) => (t.id === updatedTask.id ? prevTask : t));
+              notifySubscribers();
+            }
+          }
+        });
     }
 
     const currentUser = BOPSStore.getCurrentUser();
     BOPSStore.addAuditLog(
-      currentUser.id,
-      currentUser.fullName,
-      currentUser.role,
+      currentUser?.id || 'system',
+      currentUser?.fullName || 'Há»‡ thá»‘ng',
+      currentUser?.role || 'manager',
       'Task',
       'UPDATE_TASK',
-      `Cập nhật thông tin nhiệm vụ "${updatedTask.title || updatedTask.taskName}"`
+      `Cáº­p nháº­t thÃ´ng tin nhiá»‡m vá»¥ "${updatedTask.title || updatedTask.taskName}"`
     );
   },
 
-  deleteTask(taskId: string): void {
+  async deleteTask(taskId: string): Promise<{ success: boolean; error?: string }> {
+    const target = state.tasks.find((t) => t.id === taskId);
+    if (!target) return { success: false, error: 'KhÃ´ng tÃ¬m tháº¥y nhiá»‡m vá»¥' };
+
     state.tasks = state.tasks.filter((t) => t.id !== taskId);
     notifySubscribers();
 
     if (supabase && isSupabaseConfigured) {
-      supabase
-        .from('tasks')
-        .delete()
-        .eq('id', taskId)
-        .then();
+      try {
+        const { error } = await supabase
+          .from('tasks')
+          .delete()
+          .eq('id', taskId);
+
+        if (error) {
+          console.error('[BOPS Delete] Lá»—i khi xÃ³a nhiá»‡m vá»¥ trÃªn Supabase:', error);
+          if (!state.tasks.some((t) => t.id === taskId)) {
+            state.tasks.push(target);
+            notifySubscribers();
+          }
+          return { success: false, error: error.message };
+        }
+      } catch (err: any) {
+        console.error('[BOPS Delete] Exception khi xÃ³a nhiá»‡m vá»¥:', err);
+        if (!state.tasks.some((t) => t.id === taskId)) {
+          state.tasks.push(target);
+          notifySubscribers();
+        }
+        return { success: false, error: err?.message || 'Lá»—i máº¡ng khi xÃ³a' };
+      }
     }
 
     const currentUser = BOPSStore.getCurrentUser();
     BOPSStore.addAuditLog(
-      currentUser.id,
-      currentUser.fullName,
-      currentUser.role,
+      currentUser?.id || 'system',
+      currentUser?.fullName || 'Há»‡ thá»‘ng',
+      currentUser?.role || 'manager',
       'Task',
       'DELETE_TASK',
-      `Xóa nhiệm vụ ID: ${taskId}`
+      `XÃ³a nhiá»‡m vá»¥ ID: ${taskId}`
     );
+
+    return { success: true };
   },
 
   updateTaskStatus(
@@ -1924,6 +2813,9 @@ export const BOPSStore = {
     photos?: string[]
   ): void {
     const nowTime = new Date().toTimeString().substring(0, 5);
+    const currentUser = BOPSStore.getCurrentUser();
+    const isManager = currentUser?.role === 'manager';
+
     state.tasks = state.tasks.map((t) => {
       if (t.id === taskId) {
         const updated: TaskInstance = {
@@ -1934,11 +2826,32 @@ export const BOPSStore = {
           note: note !== undefined ? note : t.note,
           proofPhotos: photos ? [...(t.proofPhotos || []), ...photos] : t.proofPhotos,
         };
+
         if (supabase && isSupabaseConfigured) {
+          // PhÃ¢n biá»‡t quyá»n Quáº£n lÃ½ vÃ  GVQN:
+          // GVQN chá»‰ cáº­p nháº­t cÃ¡c trÆ°á»ng tiáº¿n Ä‘á»™/minh chá»©ng theo whitelist: status, actual_start, actual_end, note, proof_photos (khÃ´ng cÃ³ tasks.updated_at)
+          // Quáº£n lÃ½ Ä‘Æ°á»£c cáº­p nháº­t toÃ n bá»™ trÆ°á»ng
+          let payload: Record<string, any>;
+          if (isManager) {
+            const { id: _id, ...managerPayload } = taskToDb(updated);
+            payload = managerPayload;
+          } else {
+            payload = {
+              status,
+              actual_start: updated.actualStart || null,
+              actual_end: updated.actualEnd || null,
+              note: updated.note || null,
+              proof_photos: updated.proofPhotos || [],
+            };
+          }
+
           supabase
             .from('tasks')
-            .upsert(taskToDb(updated), { onConflict: 'id' })
-            .then();
+            .update(payload)
+            .eq('id', taskId)
+            .then(({ error }) => {
+              if (error) console.error('Lá»—i khi cáº­p nháº­t tiáº¿n Ä‘á»™ nhiá»‡m vá»¥:', error);
+            });
         }
         return updated;
       }
@@ -1946,23 +2859,27 @@ export const BOPSStore = {
     });
     notifySubscribers();
 
-    const currentUser = BOPSStore.getCurrentUser();
     BOPSStore.addAuditLog(
       currentUser.id,
       currentUser.fullName,
       currentUser.role,
       'Task',
       'UPDATE_TASK_STATUS',
-      `Cập nhật trạng thái nhiệm vụ "${taskId}" sang ${status.toUpperCase()}`
+      `Cáº­p nháº­t tráº¡ng thÃ¡i nhiá»‡m vá»¥ "${taskId}" sang ${status.toUpperCase()}`
     );
 
-    const affectedTask = state.tasks.find((t) => t.id === taskId);
-    if (affectedTask) {
-      BOPSStore.calculateKPIForTeacher(affectedTask.teacherId, affectedTask.date);
+    // TÃ¡ch riÃªng luá»“ng KPI: Chá»‰ tÃ i khoáº£n Quáº£n lÃ½ má»›i Ä‘Æ°á»£c kÃ­ch hoáº¡t tÃ­nh toÃ¡n vÃ  ghi nháº­n KPI vÃ o báº£ng kpis.
+    // GVQN chá»‰ cáº­p nháº­t tiáº¿n Ä‘á»™ nhiá»‡m vá»¥ vÃ  khÃ´ng trá»±c tiáº¿p gá»i hÃ m ghi KPI.
+    if (isManager) {
+      const affectedTask = state.tasks.find((t) => t.id === taskId);
+      if (affectedTask) {
+        BOPSStore.calculateKPIForTeacher(affectedTask.teacherId, affectedTask.date);
+      }
     }
   },
 
   verifyTask(taskId: string, verifiedBy: string, approved: boolean): void {
+    let affectedTask: TaskInstance | undefined;
     state.tasks = state.tasks.map((t) => {
       if (t.id === taskId) {
         const updated: TaskInstance = {
@@ -1972,17 +2889,55 @@ export const BOPSStore = {
           verifiedAt: new Date().toISOString().replace('T', ' ').substring(0, 16),
           status: approved ? ('verified' as TaskStatus) : t.status,
         };
+        affectedTask = updated;
         if (supabase && isSupabaseConfigured) {
+          const { id: _id, ...taskPayload } = taskToDb(updated);
           supabase
             .from('tasks')
-            .upsert(taskToDb(updated), { onConflict: 'id' })
-            .then();
+            .update(taskPayload)
+            .eq('id', taskId)
+            .then(
+              ({ error }) => {
+                if (error) {
+                  console.error('Lá»—i khi nghiá»‡m thu nhiá»‡m vá»¥:', error);
+                } else {
+                  // Chá»‰ tÃ­nh láº¡i KPI sau khi thao tÃ¡c cáº­p nháº­t task thÃ nh cÃ´ng
+                  try {
+                    const currentUser = BOPSStore.getCurrentUser();
+                    const isManager = currentUser?.role === 'manager' || (currentUser?.role as string) === 'supervisor';
+                    if (isManager && updated.teacherId && updated.date) {
+                      BOPSStore.calculateKPIForTeacher(updated.teacherId, updated.date);
+                    }
+                  } catch (kpiErr) {
+                    console.error('Lá»—i tÃ­nh KPI sau khi nghiá»‡m thu (khÃ´ng giÃ¡n Ä‘oáº¡n luá»“ng duyá»‡t):', kpiErr);
+                  }
+                }
+              },
+              (err) => {
+                console.error('Lá»—i ngoáº¡i lá»‡ khi nghiá»‡m thu nhiá»‡m vá»¥:', err);
+              }
+            );
         }
         return updated;
       }
       return t;
     });
     notifySubscribers();
+
+    // MÃ´i trÆ°á»ng offline / dev chÆ°a cáº¥u hÃ¬nh Supabase: tÃ­nh láº¡i KPI náº¿u lÃ  Quáº£n lÃ½
+    if (!supabase || !isSupabaseConfigured) {
+      if (affectedTask && affectedTask.teacherId && affectedTask.date) {
+        try {
+          const currentUser = BOPSStore.getCurrentUser();
+          const isManager = currentUser?.role === 'manager' || (currentUser?.role as string) === 'supervisor';
+          if (isManager) {
+            BOPSStore.calculateKPIForTeacher(affectedTask.teacherId, affectedTask.date);
+          }
+        } catch (kpiErr) {
+          console.error('Lá»—i tÃ­nh KPI offline:', kpiErr);
+        }
+      }
+    }
   },
 
   evaluateWorkItem(params: {
@@ -2019,10 +2974,14 @@ export const BOPSStore = {
             status: params.evaluation === 'approved' ? 'verified' : 'rejected',
           };
           if (supabase && isSupabaseConfigured) {
+            const { id: _id, ...taskPayload } = taskToDb(updated);
             supabase
               .from('tasks')
-              .upsert(taskToDb(updated), { onConflict: 'id' })
-              .then();
+              .update(taskPayload)
+              .eq('id', params.itemId)
+              .then(({ error }) => {
+                if (error) console.error('Lá»—i khi Ä‘Ã¡nh giÃ¡ nhiá»‡m vá»¥:', error);
+              });
           }
           return updated;
         }
@@ -2046,10 +3005,14 @@ export const BOPSStore = {
             status: params.evaluation === 'approved' ? 'verified' : 'rejected',
           };
           if (supabase && isSupabaseConfigured) {
+            const { id: _id, ...schedulePayload } = scheduleToDb(updated);
             supabase
               .from('schedules')
-              .upsert(scheduleToDb(updated), { onConflict: 'id' })
-              .then();
+              .update(schedulePayload)
+              .eq('id', params.itemId)
+              .then(({ error }) => {
+                if (error) console.error('Lá»—i khi Ä‘Ã¡nh giÃ¡ ca trá»±c:', error);
+              });
           }
           return updated;
         }
@@ -2067,7 +3030,7 @@ export const BOPSStore = {
           existingKpi.penalties = [
             ...(existingKpi.penalties || []),
             {
-              reason: `Vi phạm/Chưa đạt: ${params.reason || params.criteriaLabel || 'Nội dung ca trực'}`,
+              reason: `Vi pháº¡m/ChÆ°a Ä‘áº¡t: ${params.reason || params.criteriaLabel || 'Ná»™i dung ca trá»±c'}`,
               pointsDeducted: params.deductedPoints,
               time: nowIso,
             },
@@ -2088,11 +3051,11 @@ export const BOPSStore = {
 
       BOPSStore.addNotification({
         receiverId: teacherId,
-        title: `Quản lý đánh giá ca/nhiệm vụ: ${titleStr}`,
-        content: `Thầy/Cô ${teacherName} được đánh giá: ${
+        title: `Quáº£n lÃ½ Ä‘Ã¡nh giÃ¡ ca/nhiá»‡m vá»¥: ${titleStr}`,
+        content: `Tháº§y/CÃ´ ${teacherName} Ä‘Æ°á»£c Ä‘Ã¡nh giÃ¡: ${
           params.evaluation === 'approved'
-            ? 'ĐẠT YÊU CẦU'
-            : `CHƯA ĐẠT (${params.reason || 'Cần rút kinh nghiệm'})`
+            ? 'Äáº T YÃŠU Cáº¦U'
+            : `CHÆ¯A Äáº T (${params.reason || 'Cáº§n rÃºt kinh nghiá»‡m'})`
         }`,
         type: 'task',
         priority: params.evaluation === 'approved' ? 'low' : 'high',
@@ -2105,13 +3068,13 @@ export const BOPSStore = {
         currentUser.role,
         'Evaluation',
         'EVALUATE_WORK_ITEM',
-        `Đánh giá ca/nhiệm vụ "${titleStr}" của GV ${teacherName}: ${params.evaluation === 'approved' ? 'HOÀN THÀNH' : `CHƯA TỐT (-${params.deductedPoints || 2} điểm)`}`
+        `ÄÃ¡nh giÃ¡ ca/nhiá»‡m vá»¥ "${titleStr}" cá»§a GV ${teacherName}: ${params.evaluation === 'approved' ? 'HOÃ€N THÃ€NH' : `CHÆ¯A Tá»T (-${params.deductedPoints || 2} Ä‘iá»ƒm)`}`
       );
     }
   },
 
   // --------------------------------------------------------------------------
-  // 7. INTERACTIONS (TƯƠNG TÁC 1-1 HỌC SINH - GHI/ĐỌC TRỰC TIẾP SUPABASE)
+  // 7. INTERACTIONS (TÆ¯Æ NG TÃC 1-1 Há»ŒC SINH - GHI/Äá»ŒC TRá»°C TIáº¾P SUPABASE)
   // --------------------------------------------------------------------------
   getInteractions(): Interaction1on1[] {
     return state.interactions;
@@ -2126,7 +3089,7 @@ export const BOPSStore = {
 
     state.interactions.unshift(newInteraction);
 
-    // Cập nhật ngày tương tác gần nhất và số lần trong tháng của học sinh
+    // Cáº­p nháº­t ngÃ y tÆ°Æ¡ng tÃ¡c gáº§n nháº¥t vÃ  sá»‘ láº§n trong thÃ¡ng cá»§a há»c sinh
     state.students = state.students.map((s) => {
       if (s.id === interactionData.studentId) {
         return {
@@ -2140,16 +3103,16 @@ export const BOPSStore = {
 
     notifySubscribers();
 
-    // Đồng bộ lập tức sang Supabase PostgreSQL
+    // Äá»“ng bá»™ láº­p tá»©c sang Supabase PostgreSQL
     if (supabase && isSupabaseConfigured) {
       supabase
         .from('interactions')
         .insert(interactionToDb(newInteraction))
         .then(({ error }) => {
-          if (error) console.error('Lỗi khi lưu tương tác 1-1 vào Supabase:', error);
+          if (error) console.error('Lá»—i khi lÆ°u tÆ°Æ¡ng tÃ¡c 1-1 vÃ o Supabase:', error);
         });
 
-      // Cập nhật cả bảng students trong Supabase
+      // Cáº­p nháº­t cáº£ báº£ng students trong Supabase
       const st = state.students.find((s) => s.id === interactionData.studentId);
       if (st) {
         supabase
@@ -2170,7 +3133,7 @@ export const BOPSStore = {
       currentUser.role,
       'Interaction',
       'ADD_INTERACTION_1ON1',
-      `Nhập tương tác 1-1 với học sinh ${interactionData.studentName} (${interactionData.topic})`
+      `Nháº­p tÆ°Æ¡ng tÃ¡c 1-1 vá»›i há»c sinh ${interactionData.studentName} (${interactionData.topic})`
     );
 
     BOPSStore.calculateKPIForTeacher(interactionData.teacherId, interactionData.interactionDate);
@@ -2178,32 +3141,49 @@ export const BOPSStore = {
     return newInteraction;
   },
 
-  deleteInteraction(interactionId: string): void {
+  async deleteInteraction(interactionId: string): Promise<{ success: boolean; error?: string }> {
     const target = state.interactions.find((i) => i.id === interactionId);
+    if (!target) return { success: false, error: 'KhÃ´ng tÃ¬m tháº¥y nháº­t kÃ½ tÆ°Æ¡ng tÃ¡c' };
+
     state.interactions = state.interactions.filter((i) => i.id !== interactionId);
     notifySubscribers();
 
     if (supabase && isSupabaseConfigured) {
-      supabase
-        .from('interactions')
-        .delete()
-        .eq('id', interactionId)
-        .then(({ error }) => {
-          if (error) console.error('Lỗi khi xóa tương tác trên Supabase:', error);
-        });
+      try {
+        const { error } = await supabase
+          .from('interactions')
+          .delete()
+          .eq('id', interactionId);
+
+        if (error) {
+          console.error('[BOPS Delete] Lá»—i khi xÃ³a tÆ°Æ¡ng tÃ¡c trÃªn Supabase:', error);
+          if (!state.interactions.some((i) => i.id === interactionId)) {
+            state.interactions.push(target);
+            notifySubscribers();
+          }
+          return { success: false, error: error.message };
+        }
+      } catch (err: any) {
+        console.error('[BOPS Delete] Exception khi xÃ³a tÆ°Æ¡ng tÃ¡c:', err);
+        if (!state.interactions.some((i) => i.id === interactionId)) {
+          state.interactions.push(target);
+          notifySubscribers();
+        }
+        return { success: false, error: err?.message || 'Lá»—i máº¡ng khi xÃ³a' };
+      }
     }
 
-    if (target) {
-      const currentUser = BOPSStore.getCurrentUser();
-      BOPSStore.addAuditLog(
-        currentUser.id,
-        currentUser.fullName,
-        currentUser.role,
-        'Interaction',
-        'DELETE_INTERACTION_1ON1',
-        `Xóa nhật ký tương tác 1-1 với học sinh ${target.studentName} (${target.topic})`
-      );
-    }
+    const currentUser = BOPSStore.getCurrentUser();
+    BOPSStore.addAuditLog(
+      currentUser?.id || 'system',
+      currentUser?.fullName || 'Há»‡ thá»‘ng',
+      currentUser?.role || 'teacher',
+      'Interaction',
+      'DELETE_INTERACTION_1ON1',
+      `XÃ³a nháº­t kÃ½ tÆ°Æ¡ng tÃ¡c 1-1 vá»›i há»c sinh ${target.studentName} (${target.topic})`
+    );
+
+    return { success: true };
   },
 
   // --------------------------------------------------------------------------
@@ -2217,12 +3197,22 @@ export const BOPSStore = {
     state.kpis = kpis;
     notifySubscribers();
 
-    if (supabase && isSupabaseConfigured) {
+    const currentUser = BOPSStore.getCurrentUser();
+    const isManager = currentUser?.role === 'manager' || (currentUser?.role as string) === 'supervisor';
+
+    if (supabase && isSupabaseConfigured && isManager) {
       const payload = kpis.map(kpiToDb);
       supabase
         .from('kpis')
         .upsert(payload, { onConflict: 'id' })
-        .then();
+        .then(
+          ({ error }) => {
+            if (error) console.error('Lá»—i khi lÆ°u danh sÃ¡ch KPIs vÃ o Supabase:', error);
+          },
+          (err) => {
+            console.error('Lá»—i ngoáº¡i lá»‡ khi lÆ°u danh sÃ¡ch KPIs vÃ o Supabase:', err);
+          }
+        );
     }
   },
 
@@ -2236,51 +3226,76 @@ export const BOPSStore = {
       (t) => t.status === 'completed' || t.status === 'verified'
     ).length;
 
-    // 1. Điểm Vận hành (Max 50)
-    let operationScore = 50;
-    if (totalTasks > 0) {
-      const completionRate = completedTasks / totalTasks;
-      operationScore = Math.round(completionRate * 50);
-    }
-
-    // 2. Điểm Chất lượng (Max 20)
-    const verifiedTasks = tasks.filter((t) => t.verified).length;
-    let qualityScore = 18;
-    if (completedTasks > 0) {
-      qualityScore = Math.round((verifiedTasks / completedTasks) * 20);
-    }
-
-    // 3. Điểm Chăm sóc Học sinh 1-1 (Max 15)
-    // Quy định: Tuần có tối thiểu 1 HS tương tác 1-1 => Đạt 15đ trọng số
     const interactions = state.interactions.filter((i) => i.teacherId === teacherId);
     const hasWeeklyInteraction = interactions.length >= 1;
-    const studentCareScore = hasWeeklyInteraction ? 15 : 0;
-
-    // 4. Điểm Đóng góp (Max 10)
-    const contributionScore = 10;
-
-    // 5. Điểm Kỷ luật (Max 5)
-    let disciplineScore = 5;
 
     const existingKpi = state.kpis.find((k) => k.teacherId === teacherId && k.date === date);
-    if (existingKpi && existingKpi.penalties) {
-      const totalPenalties = existingKpi.penalties.reduce((sum, p) => sum + p.pointsDeducted, 0);
-      disciplineScore = Math.max(0, 5 - totalPenalties);
+
+    // Kiá»ƒm tra xem Quáº£n lÃ½ Ä‘Ã£ cháº¥m Ä‘iá»ƒm Ä‘Ã¡nh giÃ¡ thá»§ cÃ´ng trong Daily Evaluations hay chÆ°a
+    const manualEval = state.dailyEvaluations.find(
+      (e) => e.teacherId === teacherId && e.date === date && e.status === 'evaluated'
+    );
+
+    let operationScore: number;
+    let qualityScore: number;
+    let studentCareScore: number;
+    let contributionScore: number;
+    let disciplineScore: number;
+    let totalScore: number;
+    let rank: 'A+' | 'A' | 'B' | 'C' | 'D';
+
+    if (manualEval) {
+      // Báº£o toÃ n Ä‘iá»ƒm sá»‘ do Quáº£n lÃ½ Ä‘Ã£ cháº¥m thá»§ cÃ´ng, khÃ´ng bá»‹ ghi Ä‘Ã¨ bá»Ÿi cÃ´ng thá»©c tá»± Ä‘á»™ng
+      operationScore = manualEval.operationScore;
+      qualityScore = manualEval.qualityScore;
+      studentCareScore = manualEval.studentCareScore;
+      contributionScore = manualEval.contributionScore;
+      disciplineScore = manualEval.disciplineScore;
+      totalScore = manualEval.totalScore;
+      rank = manualEval.rank;
+    } else {
+      // 1. Äiá»ƒm Váº­n hÃ nh (Max 50)
+      operationScore = 50;
+      if (totalTasks > 0) {
+        const completionRate = completedTasks / totalTasks;
+        operationScore = Math.round(completionRate * 50);
+      }
+
+      // 2. Äiá»ƒm Cháº¥t lÆ°á»£ng (Max 20)
+      const verifiedTasks = tasks.filter((t) => t.verified).length;
+      qualityScore = 18;
+      if (completedTasks > 0) {
+        qualityScore = Math.round((verifiedTasks / completedTasks) * 20);
+      }
+
+      // 3. Äiá»ƒm ChÄƒm sÃ³c Há»c sinh 1-1 (Max 15)
+      // Quy Ä‘á»‹nh: Tuáº§n cÃ³ tá»‘i thiá»ƒu 1 HS tÆ°Æ¡ng tÃ¡c 1-1 => Äáº¡t 15Ä‘ trá»ng sá»‘
+      studentCareScore = hasWeeklyInteraction ? 15 : 0;
+
+      // 4. Äiá»ƒm ÄÃ³ng gÃ³p (Max 10)
+      contributionScore = 10;
+
+      // 5. Äiá»ƒm Ká»· luáº­t (Max 5)
+      disciplineScore = 5;
+      if (existingKpi && existingKpi.penalties) {
+        const totalPenalties = existingKpi.penalties.reduce((sum, p) => sum + p.pointsDeducted, 0);
+        disciplineScore = Math.max(0, 5 - totalPenalties);
+      }
+
+      totalScore = operationScore + qualityScore + studentCareScore + contributionScore + disciplineScore;
+
+      rank = 'B';
+      if (totalScore >= 97 && disciplineScore === 5) rank = 'A+';
+      else if (totalScore >= 90) rank = 'A';
+      else if (totalScore >= 80) rank = 'B';
+      else if (totalScore >= 70) rank = 'C';
+      else rank = 'D';
     }
-
-    const totalScore = operationScore + qualityScore + studentCareScore + contributionScore + disciplineScore;
-
-    let rank: 'A+' | 'A' | 'B' | 'C' | 'D' = 'B';
-    if (totalScore >= 97 && disciplineScore === 5) rank = 'A+';
-    else if (totalScore >= 90) rank = 'A';
-    else if (totalScore >= 80) rank = 'B';
-    else if (totalScore >= 70) rank = 'C';
-    else rank = 'D';
 
     const kpiRecord: KPIRecord = {
       id: existingKpi ? existingKpi.id : `kpi-${teacherId}-${date}`,
       teacherId,
-      teacherName: teacher ? teacher.fullName : 'Giáo viên',
+      teacherName: teacher ? teacher.fullName : 'GiÃ¡o viÃªn',
       teacherCode: teacher ? teacher.teacherCode : 'GV',
       date,
       operationScore,
@@ -2306,18 +3321,30 @@ export const BOPSStore = {
 
     notifySubscribers();
 
-    if (supabase && isSupabaseConfigured) {
+    // PhÃ¢n quyá»n RLS: Chá»‰ Quáº£n lÃ½ má»›i Ä‘Æ°á»£c ghi nháº­n báº£n ghi KPI chÃ­nh thá»©c lÃªn Supabase.
+    // GVQN cÃ³ thá»ƒ tháº¥y tiáº¿n Ä‘á»™ hiá»ƒn thá»‹ tá»©c thá»i, nhÆ°ng khÃ´ng gá»­i ghi Supabase.
+    const currentUser = BOPSStore.getCurrentUser();
+    const isManager = currentUser?.role === 'manager' || (currentUser?.role as string) === 'supervisor';
+
+    if (supabase && isSupabaseConfigured && isManager) {
       supabase
         .from('kpis')
         .upsert(kpiToDb(kpiRecord), { onConflict: 'id' })
-        .then();
+        .then(
+          ({ error }) => {
+            if (error) console.error('Lá»—i khi ghi nháº­n KPI vÃ o Supabase:', error);
+          },
+          (err) => {
+            console.error('Lá»—i ngoáº¡i lá»‡ khi ghi nháº­n KPI vÃ o Supabase:', err);
+          }
+        );
     }
 
     return kpiRecord;
   },
 
   // --------------------------------------------------------------------------
-  // 9. DAILY EVALUATIONS (ĐÁNH GIÁ VẬN HÀNH NGÀY - GHI/ĐỌC TRỰC TIẾP SUPABASE)
+  // 9. DAILY EVALUATIONS (ÄÃNH GIÃ Váº¬N HÃ€NH NGÃ€Y - GHI/Äá»ŒC TRá»°C TIáº¾P SUPABASE)
   // --------------------------------------------------------------------------
   getDailyEvaluations(): DailyEvaluation[] {
     return state.dailyEvaluations;
@@ -2377,7 +3404,7 @@ export const BOPSStore = {
       teacherName: evaluationData.teacherName,
       teacherCode: evaluationData.teacherCode,
       evaluatorId: 'u-mgr-01',
-      evaluatorName: 'Thầy Lê Huy Phúc',
+      evaluatorName: 'Tháº§y LÃª Huy PhÃºc',
       evaluatedAt: nowIso,
       operationScore: evaluationData.operationScore,
       qualityScore: evaluationData.qualityScore,
@@ -2400,17 +3427,17 @@ export const BOPSStore = {
 
     notifySubscribers();
 
-    // Ghi vào Supabase
+    // Ghi vÃ o Supabase
     if (supabase && isSupabaseConfigured) {
       supabase
         .from('daily_evaluations')
         .upsert(evalToDb(evaluationRecord), { onConflict: 'id' })
         .then(({ error }) => {
-          if (error) console.error('Lỗi khi lưu đánh giá ngày vào Supabase:', error);
+          if (error) console.error('Lá»—i khi lÆ°u Ä‘Ã¡nh giÃ¡ ngÃ y vÃ o Supabase:', error);
         });
     }
 
-    // Tự động đồng bộ sang bảng KPI
+    // Tá»± Ä‘á»™ng Ä‘á»“ng bá»™ sang báº£ng KPI
     const kpis = [...state.kpis];
     let kpiIndex = kpis.findIndex(
       (k) => k.teacherId === evaluationData.teacherId && k.date === evaluationData.date
@@ -2429,51 +3456,74 @@ export const BOPSStore = {
       BOPSStore.saveKPIs(kpis);
     }
 
-    // Gửi thông báo đến giáo viên
+    // Gá»­i thÃ´ng bÃ¡o Ä‘áº¿n giÃ¡o viÃªn
     BOPSStore.addNotification({
       receiverId: evaluationData.teacherId,
-      title: 'Quản lý Thầy Lê Huy Phúc đã hoàn tất đánh giá KPI ngày',
-      content: `Thầy/Cô ${evaluationData.teacherName} đạt ${totalScore}/100 điểm (Xếp hạng ${rank}) cho ngày làm việc ${evaluationData.date}. Nhận xét: "${evaluationData.generalComment}"`,
+      title: 'Quáº£n lÃ½ Tháº§y LÃª Huy PhÃºc Ä‘Ã£ hoÃ n táº¥t Ä‘Ã¡nh giÃ¡ KPI ngÃ y',
+      content: `Tháº§y/CÃ´ ${evaluationData.teacherName} Ä‘áº¡t ${totalScore}/100 Ä‘iá»ƒm (Xáº¿p háº¡ng ${rank}) cho ngÃ y lÃ m viá»‡c ${evaluationData.date}. Nháº­n xÃ©t: "${evaluationData.generalComment}"`,
       type: 'kpi',
       priority: 'high',
     });
 
     BOPSStore.addAuditLog(
       'u-mgr-01',
-      'Thầy Lê Huy Phúc',
+      'Tháº§y LÃª Huy PhÃºc',
       'manager',
       'DailyEvaluation',
       'EVALUATE_DAILY_WORK',
-      `Thầy Lê Huy Phúc đánh giá công việc ngày ${evaluationData.date} cho GV ${evaluationData.teacherName}: ${totalScore}đ (${rank})`
+      `Tháº§y LÃª Huy PhÃºc Ä‘Ã¡nh giÃ¡ cÃ´ng viá»‡c ngÃ y ${evaluationData.date} cho GV ${evaluationData.teacherName}: ${totalScore}Ä‘ (${rank})`
     );
 
     return evaluationRecord;
   },
 
-  deleteDailyEvaluation(id: string): void {
+  async deleteDailyEvaluation(id: string): Promise<{ success: boolean; error?: string }> {
+    const target = state.dailyEvaluations.find((e) => e.id === id);
+    if (!target) return { success: false, error: 'KhÃ´ng tÃ¬m tháº¥y phiáº¿u Ä‘Ã¡nh giÃ¡' };
+
     state.dailyEvaluations = state.dailyEvaluations.filter((e) => e.id !== id);
     notifySubscribers();
 
     if (supabase && isSupabaseConfigured) {
-      supabase
-        .from('daily_evaluations')
-        .delete()
-        .eq('id', id)
-        .then();
+      try {
+        const { error } = await supabase
+          .from('daily_evaluations')
+          .delete()
+          .eq('id', id);
+
+        if (error) {
+          console.error('[BOPS Delete] Lá»—i khi xÃ³a phiáº¿u Ä‘Ã¡nh giÃ¡:', error);
+          if (!state.dailyEvaluations.some((e) => e.id === id)) {
+            state.dailyEvaluations.push(target);
+            notifySubscribers();
+          }
+          return { success: false, error: error.message };
+        }
+      } catch (err: any) {
+        console.error('[BOPS Delete] Exception khi xÃ³a phiáº¿u Ä‘Ã¡nh giÃ¡:', err);
+        if (!state.dailyEvaluations.some((e) => e.id === id)) {
+          state.dailyEvaluations.push(target);
+          notifySubscribers();
+        }
+        return { success: false, error: err?.message || 'Lá»—i káº¿t ná»‘i khi xÃ³a' };
+      }
     }
 
+    const currentUser = BOPSStore.getCurrentUser();
     BOPSStore.addAuditLog(
-      'u-mgr-01',
-      'Thầy Lê Huy Phúc',
-      'manager',
+      currentUser?.id || 'system',
+      currentUser?.fullName || 'Há»‡ thá»‘ng',
+      currentUser?.role || 'manager',
       'DailyEvaluation',
       'DELETE_EVALUATION',
-      `Thầy Lê Huy Phúc đã xóa phiếu đánh giá công việc ID: ${id}`
+      `ÄÃ£ xÃ³a phiáº¿u Ä‘Ã¡nh giÃ¡ cÃ´ng viá»‡c ID: ${id}`
     );
+
+    return { success: true };
   },
 
   // --------------------------------------------------------------------------
-  // 10. DAILY WORK REPORTS (BÁO CÁO CÔNG VIỆC HẰNG NGÀY & KTX - GHI/ĐỌC TRỰC TIẾP SUPABASE)
+  // 10. DAILY WORK REPORTS (BÃO CÃO CÃ”NG VIá»†C Háº°NG NGÃ€Y & KTX - GHI/Äá»ŒC TRá»°C TIáº¾P SUPABASE)
   // --------------------------------------------------------------------------
   getDailyWorkReports(): DailyWorkReport[] {
     return state.dailyWorkReports;
@@ -2519,7 +3569,7 @@ export const BOPSStore = {
         .from('daily_work_reports')
         .upsert(reportToDb(fullReport), { onConflict: 'id' })
         .then(({ error }) => {
-          if (error) console.error('Lỗi khi gửi báo cáo ngày vào Supabase:', error);
+          if (error) console.error('Lá»—i khi gá»­i bÃ¡o cÃ¡o ngÃ y vÃ o Supabase:', error);
         });
     }
 
@@ -2528,9 +3578,9 @@ export const BOPSStore = {
       const emergencyIncidentsCount = fullReport.studentIncidents.filter((i) => i.severity === 'emergency').length;
       BOPSStore.addNotification({
         receiverId: 'u-mgr-01',
-        title: emergencyIncidentsCount > 0 ? '🚨 Cảnh báo khẩn cấp từ Báo cáo ngày' : 'Báo cáo ca trực mới',
-        content: `GV ${fullReport.teacherName} đã gửi báo cáo ca ${fullReport.shift} ngày ${fullReport.date}.${
-          emergencyIncidentsCount > 0 ? ` Có ${emergencyIncidentsCount} sự vụ học sinh khẩn cấp cần xem xét!` : ''
+        title: emergencyIncidentsCount > 0 ? 'ðŸš¨ Cáº£nh bÃ¡o kháº©n cáº¥p tá»« BÃ¡o cÃ¡o ngÃ y' : 'BÃ¡o cÃ¡o ca trá»±c má»›i',
+        content: `GV ${fullReport.teacherName} Ä‘Ã£ gá»­i bÃ¡o cÃ¡o ca ${fullReport.shift} ngÃ y ${fullReport.date}.${
+          emergencyIncidentsCount > 0 ? ` CÃ³ ${emergencyIncidentsCount} sá»± vá»¥ há»c sinh kháº©n cáº¥p cáº§n xem xÃ©t!` : ''
         }`,
         type: emergencyIncidentsCount > 0 ? 'emergency' : 'system',
         priority: emergencyIncidentsCount > 0 ? 'high' : 'medium',
@@ -2543,7 +3593,7 @@ export const BOPSStore = {
       currentUser.role,
       'DailyWorkReport',
       'SUBMIT_DAILY_REPORT',
-      `Gửi báo cáo công việc ngày ${fullReport.date} (Ca: ${fullReport.shift}) - ${fullReport.teacherName}`
+      `Gá»­i bÃ¡o cÃ¡o cÃ´ng viá»‡c ngÃ y ${fullReport.date} (Ca: ${fullReport.shift}) - ${fullReport.teacherName}`
     );
 
     return fullReport;
@@ -2571,19 +3621,19 @@ export const BOPSStore = {
 
       BOPSStore.addNotification({
         receiverId: state.dailyWorkReports[idx].teacherId,
-        title: 'Quản lý Thầy Lê Huy Phúc phản hồi báo cáo ngày',
-        content: `Thầy Phúc đã xem và gửi chỉ đạo cho báo cáo ca ${state.dailyWorkReports[idx].shift} ngày ${state.dailyWorkReports[idx].date}: "${feedback.substring(0, 80)}..."`,
+        title: 'Quáº£n lÃ½ Tháº§y LÃª Huy PhÃºc pháº£n há»“i bÃ¡o cÃ¡o ngÃ y',
+        content: `Tháº§y PhÃºc Ä‘Ã£ xem vÃ  gá»­i chá»‰ Ä‘áº¡o cho bÃ¡o cÃ¡o ca ${state.dailyWorkReports[idx].shift} ngÃ y ${state.dailyWorkReports[idx].date}: "${feedback.substring(0, 80)}..."`,
         type: 'system',
         priority: 'high',
       });
 
       BOPSStore.addAuditLog(
         'u-mgr-01',
-        'Thầy Lê Huy Phúc',
+        'Tháº§y LÃª Huy PhÃºc',
         'manager',
         'DailyWorkReport',
         'FEEDBACK_REPORT',
-        `Thầy Lê Huy Phúc phản hồi và chỉ đạo báo cáo ID: ${reportId}`
+        `Tháº§y LÃª Huy PhÃºc pháº£n há»“i vÃ  chá»‰ Ä‘áº¡o bÃ¡o cÃ¡o ID: ${reportId}`
       );
     }
   },
@@ -2624,17 +3674,49 @@ export const BOPSStore = {
     }
   },
 
-  deleteDailyWorkReport(reportId: string): void {
+  async deleteDailyWorkReport(reportId: string): Promise<{ success: boolean; error?: string }> {
+    const target = state.dailyWorkReports.find((r) => r.id === reportId);
+    if (!target) return { success: false, error: 'KhÃ´ng tÃ¬m tháº¥y bÃ¡o cÃ¡o cÃ´ng viá»‡c' };
+
     state.dailyWorkReports = state.dailyWorkReports.filter((r) => r.id !== reportId);
     notifySubscribers();
 
     if (supabase && isSupabaseConfigured) {
-      supabase
-        .from('daily_work_reports')
-        .delete()
-        .eq('id', reportId)
-        .then();
+      try {
+        const { error } = await supabase
+          .from('daily_work_reports')
+          .delete()
+          .eq('id', reportId);
+
+        if (error) {
+          console.error('[BOPS Delete] Lá»—i khi xÃ³a bÃ¡o cÃ¡o cÃ´ng viá»‡c:', error);
+          if (!state.dailyWorkReports.some((r) => r.id === reportId)) {
+            state.dailyWorkReports.push(target);
+            notifySubscribers();
+          }
+          return { success: false, error: error.message };
+        }
+      } catch (err: any) {
+        console.error('[BOPS Delete] Exception khi xÃ³a bÃ¡o cÃ¡o cÃ´ng viá»‡c:', err);
+        if (!state.dailyWorkReports.some((r) => r.id === reportId)) {
+          state.dailyWorkReports.push(target);
+          notifySubscribers();
+        }
+        return { success: false, error: err?.message || 'Lá»—i máº¡ng khi xÃ³a' };
+      }
     }
+
+    const currentUser = BOPSStore.getCurrentUser();
+    BOPSStore.addAuditLog(
+      currentUser?.id || 'system',
+      currentUser?.fullName || 'Há»‡ thá»‘ng',
+      currentUser?.role || 'manager',
+      'DailyWorkReport',
+      'DELETE_REPORT',
+      `ÄÃ£ xÃ³a bÃ¡o cÃ¡o cÃ´ng viá»‡c ngÃ y ${target.date} (Ca: ${target.shift}) cá»§a GV ${target.teacherName}`
+    );
+
+    return { success: true };
   },
 
   // --------------------------------------------------------------------------
@@ -2727,7 +3809,7 @@ export const BOPSStore = {
         .from('department_settings')
         .upsert(settingsToDb(settings), { onConflict: 'id' })
         .then(({ error }) => {
-          if (error) console.error('Lỗi khi lưu cài đặt vào Supabase:', error);
+          if (error) console.error('Lá»—i khi lÆ°u cÃ i Ä‘áº·t vÃ o Supabase:', error);
         });
     }
 
@@ -2738,25 +3820,36 @@ export const BOPSStore = {
       currentUser.role,
       'Settings',
       'UPDATE_SETTINGS',
-      'Cập nhật cấu hình quy định vận hành và công thức KPI hệ thống.'
+      'Cáº­p nháº­t cáº¥u hÃ¬nh quy Ä‘á»‹nh váº­n hÃ nh vÃ  cÃ´ng thá»©c KPI há»‡ thá»‘ng.'
     );
   },
 
-  // Khôi phục dữ liệu ban đầu
-  resetAllData(): void {
-    state.users = [...INITIAL_USERS];
-    state.students = [...INITIAL_STUDENTS];
-    state.rooms = [...INITIAL_ROOMS];
-    state.positions = [...INITIAL_POSITIONS];
-    state.schedules = [...INITIAL_SCHEDULE_ASSIGNMENTS];
-    state.tasks = [...INITIAL_TASK_INSTANCES];
-    state.interactions = [...INITIAL_INTERACTIONS];
-    state.kpis = [...INITIAL_KPIS];
-    state.dailyEvaluations = [...INITIAL_DAILY_EVALUATIONS];
-    state.dailyWorkReports = [...INITIAL_DAILY_WORK_REPORTS];
-    state.notifications = [...INITIAL_NOTIFICATIONS];
-    state.auditLogs = [...INITIAL_AUDIT_LOGS];
-    state.settings = { ...INITIAL_SETTINGS };
-    notifySubscribers();
+
+  // LÃ m má»›i dá»¯ liá»‡u báº±ng cÃ¡ch Ä‘á»“ng bá»™ tá»« Supabase
+  async resetAllData(): Promise<void> {
+    if (!supabase || !isSupabaseConfigured) {
+      console.error(
+        '[BOPS] KhÃ´ng thá»ƒ Ä‘á»“ng bá»™ dá»¯ liá»‡u: Supabase chÆ°a Ä‘Æ°á»£c cáº¥u hÃ¬nh.'
+      );
+      return;
+    }
+
+    try {
+      await fetchBusinessData();
+
+      if (state.syncError) {
+        console.error(
+          '[BOPS] Äá»“ng bá»™ dá»¯ liá»‡u chÆ°a hoÃ n táº¥t:',
+          state.syncError
+        );
+        return;
+      }
+
+      notifySubscribers();
+      console.info('[BOPS] ÄÃ£ táº£i láº¡i dá»¯ liá»‡u tá»« Supabase.');
+    } catch (err) {
+      console.error('[BOPS] Lá»—i khi Ä‘á»“ng bá»™ dá»¯ liá»‡u tá»« Supabase:', err);
+      throw err;
+    }
   },
 };

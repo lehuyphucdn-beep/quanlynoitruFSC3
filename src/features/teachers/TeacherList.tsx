@@ -20,6 +20,9 @@ import {
   LogIn,
   ShieldCheck,
   Share2,
+  Info,
+  ShieldAlert,
+  AlertTriangle,
 } from 'lucide-react';
 import { BOPSStore, subscribeToStore } from '../../services/storage';
 import { User, KPIRecord, TaskInstance, ScheduleAssignment } from '../../types';
@@ -53,11 +56,12 @@ export const TeacherList: React.FC = () => {
     position: 'Giáo viên Quản nhiệm DomB',
     building: 'DomB',
     assignedFloors: ['Tầng 2'],
-    password: '123456',
   });
 
   // Delete Teacher confirmation modal state
   const [teacherToDelete, setTeacherToDelete] = useState<User | null>(null);
+  const [isDeletingTeacher, setIsDeletingTeacher] = useState(false);
+  const [deleteTeacherError, setDeleteTeacherError] = useState<string | null>(null);
 
   // Work Evaluation Modal state
   const [evaluationItem, setEvaluationItem] = useState<WorkEvaluationItem | null>(null);
@@ -148,16 +152,29 @@ export const TeacherList: React.FC = () => {
   };
 
   const handleDeleteTeacher = (teacher: User) => {
+    setDeleteTeacherError(null);
     setTeacherToDelete(teacher);
   };
 
-  const confirmDeleteTeacher = () => {
+  const confirmDeleteTeacher = async () => {
     if (teacherToDelete) {
-      BOPSStore.deleteUser(teacherToDelete.id);
-      if (selectedTeacher?.id === teacherToDelete.id) {
-        setSelectedTeacher(null);
+      setIsDeletingTeacher(true);
+      setDeleteTeacherError(null);
+      try {
+        const res = await BOPSStore.deleteUser(teacherToDelete.id);
+        if (!res.success) {
+          setDeleteTeacherError(res.error || 'Lỗi khi xóa tài khoản trên máy chủ.');
+          return;
+        }
+        if (selectedTeacher?.id === teacherToDelete.id) {
+          setSelectedTeacher(null);
+        }
+        setTeacherToDelete(null);
+      } catch (err: any) {
+        setDeleteTeacherError(err?.message || 'Lỗi khi xóa tài khoản');
+      } finally {
+        setIsDeletingTeacher(false);
       }
-      setTeacherToDelete(null);
     }
   };
 
@@ -194,7 +211,6 @@ export const TeacherList: React.FC = () => {
       position: 'Giáo viên Quản nhiệm',
       building: 'Tòa A - Nam',
       assignedFloors: ['Tầng 2'],
-      password: '123456',
     });
   };
 
@@ -204,37 +220,25 @@ Giáo viên: ${teacher.fullName}
 Mã GVQN: ${teacher.teacherCode}
 Tài khoản đăng nhập (Tên viết tắt): ${teacher.username || teacher.teacherCode}
 Email: ${teacher.email}
-Mật khẩu đăng nhập: ${teacher.password || teacher.fullName}
+Xác thực: Tài khoản bảo mật qua hệ thống Supabase Auth
 Đường dẫn: Hệ thống Quản trị Nội trú BOPS`;
     navigator.clipboard.writeText(text);
     setCopySuccess(true);
     setTimeout(() => setCopySuccess(false), 2500);
   };
 
-  const handleResetPassword = (teacher: User, customPass?: string) => {
-    const passToSet = (customPass || resetPasswordInput || '123456').trim();
-    if (!passToSet) return;
-
-    const updated = {
-      ...teacher,
-      password: passToSet,
-    };
-    BOPSStore.updateUser(updated);
-
-    if (selectedTeacher && selectedTeacher.id === teacher.id) {
-      setSelectedTeacher(updated);
-    }
-    if (handoverTeacher && handoverTeacher.id === teacher.id) {
-      setHandoverTeacher(updated);
-    }
-
-    setPasswordMsg(`Đã cập nhật mật khẩu cho ${teacher.fullName} thành: "${passToSet}"`);
-    setTimeout(() => setPasswordMsg(null), 3500);
+  const handleResetPassword = (_teacher: User, _customPass?: string) => {
+    // Tạm vô hiệu hóa theo yêu cầu C2: Không reset mật khẩu bằng cách ghi chuỗi 123456 vào bảng users
+    setPasswordMsg(
+      'Tính năng quản lý đặt lại mật khẩu cho giáo viên tạm thời bị khóa vì lý do an toàn. Hệ thống chưa có API quản trị máy chủ (admin server-side auth). Giáo viên cần tự đăng nhập và dùng chức năng Đổi mật khẩu cá nhân.'
+    );
+    setTimeout(() => setPasswordMsg(null), 6000);
   };
 
-  const handleQuickSwitchUser = (teacher: User) => {
-    BOPSStore.setCurrentUser(teacher.id);
-    alert(`Đã chuyển đăng nhập sang tài khoản Giáo viên ${teacher.fullName} (${teacher.teacherCode})`);
+  const handleQuickSwitchUser = (_teacher: User) => {
+    alert(
+      'Chuyển đổi nhanh tài khoản không được hỗ trợ trong cơ chế Supabase Auth. Vui lòng đăng xuất và đăng nhập bằng thông tin xác thực chính thức.'
+    );
     setHandoverTeacher(null);
     setSelectedTeacher(null);
   };
@@ -433,8 +437,11 @@ Mật khẩu đăng nhập: ${teacher.password || teacher.fullName}
                       <span className="font-mono font-extrabold text-blue-600 dark:text-blue-400 text-sm">{selectedTeacher.username || selectedTeacher.teacherCode}</span>
                     </div>
                     <div>
-                      <span className="text-[10px] text-slate-400 block font-semibold">Mật khẩu đăng nhập</span>
-                      <span className="font-bold text-amber-700 dark:text-amber-300 text-sm">{selectedTeacher.password || selectedTeacher.fullName}</span>
+                      <span className="text-[10px] text-slate-400 block font-semibold">Cơ chế xác thực</span>
+                      <span className="font-semibold text-emerald-600 dark:text-emerald-400 text-xs flex items-center gap-1">
+                        <ShieldCheck className="h-3.5 w-3.5 text-emerald-500" />
+                        Supabase Auth (Mã hóa an toàn)
+                      </span>
                     </div>
                     <div>
                       <span className="text-[10px] text-slate-400 block font-semibold">Mã GV & Email</span>
@@ -450,42 +457,49 @@ Mật khẩu đăng nhập: ${teacher.password || teacher.fullName}
                       <Copy className="h-3.5 w-3.5" />
                       <span>Sao Chép Thẻ Bàn Giao (Để gửi Zalo / Email)</span>
                     </button>
-
-                    <button
-                      onClick={() => handleQuickSwitchUser(selectedTeacher)}
-                      className="flex items-center gap-1.5 rounded-xl bg-blue-600 px-3.5 py-2 font-bold text-white shadow-sm hover:bg-blue-700 transition"
-                    >
-                      <LogIn className="h-3.5 w-3.5" />
-                      <span>Đăng Nhập Thử Tài Khoản Này</span>
-                    </button>
                   </div>
                 </div>
 
-                {/* Change Password Card */}
-                <div className="rounded-2xl border border-blue-200 bg-blue-50/50 p-4 dark:border-blue-900/60 dark:bg-slate-900 space-y-3">
-                  <h4 className="font-bold text-slate-900 dark:text-white flex items-center gap-2 text-xs">
-                    <KeyRound className="h-4 w-4 text-blue-600" />
-                    Cập Nhật Mật Khẩu Đăng Nhập
-                  </h4>
+                {/* Change Password Card - Admin Reset Disabled in C2 */}
+                <div className="rounded-2xl border border-slate-200 bg-slate-50/60 p-4 dark:border-slate-800 dark:bg-slate-900/60 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <h4 className="font-bold text-slate-900 dark:text-white flex items-center gap-2 text-xs">
+                      <KeyRound className="h-4 w-4 text-slate-500" />
+                      Đặt Lại Mật Khẩu Cho Giáo Viên
+                    </h4>
+                    <span className="rounded-full bg-amber-100 px-2.5 py-0.5 text-[10px] font-bold text-amber-800 dark:bg-amber-950 dark:text-amber-300">
+                      Tạm khóa an toàn
+                    </span>
+                  </div>
+
+                  <div className="rounded-xl border border-amber-200/80 bg-amber-50/80 p-3 text-[11px] text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/40 dark:text-amber-200 flex items-start gap-2">
+                    <AlertTriangle className="h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400 mt-0.5" />
+                    <div className="leading-relaxed">
+                      Chức năng quản lý đặt lại mật khẩu của người khác tạm thời được vô hiệu hóa để bảo đảm an toàn dữ liệu, tránh ghi chuỗi mật khẩu thô vào hệ thống. Giáo viên vui lòng tự đăng nhập và đổi mật khẩu qua mục <strong>Đổi mật khẩu cá nhân</strong>.
+                    </div>
+                  </div>
+
                   {passwordMsg && (
-                    <div className="p-2.5 rounded-xl bg-emerald-100 text-emerald-900 font-bold text-[11px] dark:bg-emerald-950 dark:text-emerald-300">
+                    <div className="p-2.5 rounded-xl bg-amber-100 text-amber-900 font-bold text-[11px] dark:bg-amber-950 dark:text-amber-300">
                       {passwordMsg}
                     </div>
                   )}
-                  <div className="flex items-center gap-2">
+
+                  <div className="flex items-center gap-2 opacity-60">
                     <input
                       type="text"
-                      value={resetPasswordInput}
-                      onChange={(e) => setResetPasswordInput(e.target.value)}
-                      placeholder="Mật khẩu mới..."
-                      className="flex-1 rounded-xl border border-slate-200 bg-white px-3 py-2 font-mono font-bold text-slate-900 focus:border-blue-500 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-white text-xs shadow-sm"
+                      disabled
+                      value="●●●●●●●●"
+                      placeholder="Mật khẩu được quản lý bởi Supabase Auth..."
+                      className="flex-1 rounded-xl border border-slate-200 bg-slate-100 px-3 py-2 font-mono font-bold text-slate-500 cursor-not-allowed dark:border-slate-700 dark:bg-slate-800 dark:text-slate-400 text-xs shadow-sm"
                     />
                     <button
                       type="button"
+                      disabled
                       onClick={() => handleResetPassword(selectedTeacher)}
-                      className="rounded-xl bg-blue-600 px-4 py-2 font-bold text-white shadow-sm hover:bg-blue-700 transition text-xs shrink-0"
+                      className="rounded-xl bg-slate-300 px-4 py-2 font-bold text-slate-500 cursor-not-allowed text-xs shrink-0 dark:bg-slate-700 dark:text-slate-400"
                     >
-                      Lưu Mật Khẩu Mới
+                      Khóa An Toàn
                     </button>
                   </div>
                 </div>
@@ -499,7 +513,7 @@ Mật khẩu đăng nhập: ${teacher.password || teacher.fullName}
                     <li>Trưởng bộ phận bấm <strong>"Sao Chép Thẻ Bàn Giao"</strong> ở trên.</li>
                     <li>Gửi trực tiếp qua Zalo/Email cho giáo viên quản nhiệm.</li>
                     <li>Giáo viên mở hệ thống BOPS, bấm nút <strong>"Đăng nhập"</strong> ở góc trên bên phải.</li>
-                    <li>Chọn mã GV <strong>{selectedTeacher.teacherCode}</strong> hoặc nhập email, sau đó nhập mật khẩu <strong>123456</strong>.</li>
+                    <li>Nhập email công vụ được cấp và mật khẩu đã khởi tạo trong hệ thống xác thực Supabase Auth.</li>
                   </ol>
                 </div>
               </div>
@@ -1001,8 +1015,11 @@ Mật khẩu đăng nhập: ${teacher.password || teacher.fullName}
                   <span className="font-mono font-extrabold text-blue-600 dark:text-blue-400">{handoverTeacher.username || handoverTeacher.teacherCode}</span>
                 </div>
                 <div className="flex justify-between border-b border-slate-100 pb-1.5 dark:border-slate-800">
-                  <span className="text-slate-500 font-medium">Mật khẩu đăng nhập:</span>
-                  <strong className="text-amber-700 dark:text-amber-300 font-bold">{handoverTeacher.password || handoverTeacher.fullName}</strong>
+                  <span className="text-slate-500 font-medium">Cơ chế xác thực:</span>
+                  <span className="text-emerald-700 dark:text-emerald-300 font-bold flex items-center gap-1 text-xs">
+                    <ShieldCheck className="h-3.5 w-3.5 text-emerald-600" />
+                    Supabase Auth (Mã hóa an toàn)
+                  </span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-slate-500 font-medium">Mã GV / Email:</span>
@@ -1022,14 +1039,6 @@ Mật khẩu đăng nhập: ${teacher.password || teacher.fullName}
               </button>
 
               <button
-                onClick={() => handleQuickSwitchUser(handoverTeacher)}
-                className="w-full flex items-center justify-center gap-2 rounded-xl bg-blue-600 p-2.5 font-bold text-white shadow-md hover:bg-blue-700 transition"
-              >
-                <LogIn className="h-4 w-4" />
-                <span>Đăng Nhập Thử Tài Khoản Giáo Viên Này</span>
-              </button>
-
-              <button
                 onClick={() => setHandoverTeacher(null)}
                 className="w-full rounded-xl border border-slate-200 p-2 font-bold text-slate-600 hover:bg-slate-100 dark:border-slate-700 dark:text-slate-300"
               >
@@ -1043,8 +1052,15 @@ Mật khẩu đăng nhập: ${teacher.password || teacher.fullName}
       {/* Confirm Delete Teacher Modal */}
       <ConfirmDeleteModal
         isOpen={!!teacherToDelete}
-        onClose={() => setTeacherToDelete(null)}
+        onClose={() => {
+          if (!isDeletingTeacher) {
+            setTeacherToDelete(null);
+            setDeleteTeacherError(null);
+          }
+        }}
         onConfirm={confirmDeleteTeacher}
+        isLoading={isDeletingTeacher}
+        errorMessage={deleteTeacherError}
         title="Xác nhận xóa tài khoản giáo viên"
         itemName={teacherToDelete ? `Giáo viên ${teacherToDelete.fullName} (${teacherToDelete.teacherCode})` : ''}
       />

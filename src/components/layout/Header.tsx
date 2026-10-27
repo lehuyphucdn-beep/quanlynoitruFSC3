@@ -29,7 +29,7 @@ export const Header: React.FC<HeaderProps> = ({
   activeModule,
   setActiveModule,
 }) => {
-  const [currentUser, setCurrentUser] = useState<User>(BOPSStore.getCurrentUser());
+  const [currentUser, setCurrentUser] = useState<User | null>(BOPSStore.getCurrentUser());
   const [allUsers, setAllUsers] = useState<User[]>(BOPSStore.getUsers());
   const [notifications, setNotifications] = useState(BOPSStore.getNotifications());
   const [showNotifDropdown, setShowNotifDropdown] = useState(false);
@@ -37,17 +37,28 @@ export const Header: React.FC<HeaderProps> = ({
   const [isChangePasswordOpen, setIsChangePasswordOpen] = useState(false);
 
   useEffect(() => {
-    const unsubscribe = subscribeToStore(() => {
+    const handleUpdate = () => {
       setCurrentUser(BOPSStore.getCurrentUser());
       setAllUsers(BOPSStore.getUsers());
       setNotifications(BOPSStore.getNotifications());
-    });
+      if (BOPSStore.isPasswordRecovery()) {
+        setIsChangePasswordOpen(true);
+      }
+    };
+
+    if (BOPSStore.isPasswordRecovery()) {
+      setIsChangePasswordOpen(true);
+    }
+
+    const unsubscribe = subscribeToStore(handleUpdate);
     return unsubscribe;
   }, []);
 
-  const unreadCount = notifications.filter(
-    (n) => !n.read && (n.receiverId === currentUser.id || n.receiverId === currentUser.role || n.receiverId === 'all')
-  ).length;
+  const unreadCount = currentUser
+    ? notifications.filter(
+        (n) => !n.read && (n.receiverId === currentUser.id || n.receiverId === currentUser.role || n.receiverId === 'all')
+      ).length
+    : 0;
 
   const currentDisplayTime = new Date().toLocaleTimeString('vi-VN', {
     hour: '2-digit',
@@ -89,7 +100,7 @@ export const Header: React.FC<HeaderProps> = ({
       {/* Right: Login Button, User Chip, Notifications, Dark Mode */}
       <div className="flex items-center gap-2 sm:gap-3">
         {/* User Info / Login / Logout Button */}
-        {BOPSStore.isLoggedIn() ? (
+        {BOPSStore.isLoggedIn() && currentUser ? (
           <div className="flex items-center gap-2">
             <div className="hidden sm:flex items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs dark:border-slate-700 dark:bg-slate-800">
               <img
@@ -115,8 +126,8 @@ export const Header: React.FC<HeaderProps> = ({
               <span className="hidden md:inline">Đổi MK</span>
             </button>
             <button
-              onClick={() => {
-                BOPSStore.logout();
+              onClick={async () => {
+                await BOPSStore.logout();
                 setIsLoginModalOpen(true);
               }}
               className="flex items-center gap-1.5 rounded-xl border border-slate-200 bg-slate-100 px-3 py-1.5 text-xs font-bold text-slate-700 hover:bg-slate-200 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700 transition"

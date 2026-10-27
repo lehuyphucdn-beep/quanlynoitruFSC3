@@ -27,7 +27,7 @@ interface TodayScreenProps {
 }
 
 export const TodayScreen: React.FC<TodayScreenProps> = ({ setActiveModule }) => {
-  const [currentUser, setCurrentUser] = useState<User>(BOPSStore.getCurrentUser());
+  const [currentUser, setCurrentUser] = useState<User | null>(BOPSStore.getCurrentUser());
   const [tasks, setTasks] = useState<TaskInstance[]>([]);
   const [selectedTaskForComplete, setSelectedTaskForComplete] = useState<TaskInstance | null>(null);
   const [completionNote, setCompletionNote] = useState('');
@@ -39,7 +39,7 @@ export const TodayScreen: React.FC<TodayScreenProps> = ({ setActiveModule }) => 
       const u = BOPSStore.getCurrentUser();
       setCurrentUser(u);
       const allTasks = BOPSStore.getTasks();
-      const userTasks = allTasks.filter((t) => t.teacherId === u.id);
+      const userTasks = u ? allTasks.filter((t) => t.teacherId === u.id) : [];
       setTasks(userTasks);
     };
 
@@ -58,6 +58,20 @@ export const TodayScreen: React.FC<TodayScreenProps> = ({ setActiveModule }) => 
   const completedCount = tasks.filter((t) => t.status === 'completed' || t.status === 'verified').length;
   const pendingCount = tasks.filter((t) => t.status === 'pending' || t.status === 'working').length;
   const lateCount = tasks.filter((t) => t.status === 'late').length;
+
+  if (!currentUser) {
+    return (
+      <div className="flex flex-col items-center justify-center rounded-3xl border border-dashed border-slate-300 bg-white p-12 text-center shadow-sm dark:border-slate-800 dark:bg-slate-900">
+        <CalendarCheck className="h-12 w-12 text-blue-500 mb-3" />
+        <h3 className="text-base font-bold text-slate-800 dark:text-slate-100">
+          Chưa đăng nhập vào hệ thống
+        </h3>
+        <p className="mt-1 text-xs text-slate-500 dark:text-slate-400 max-w-md">
+          Vui lòng bấm nút <strong>Đăng nhập</strong> ở góc trên bên phải để vào ca trực và quản lý nhiệm vụ hôm nay.
+        </p>
+      </div>
+    );
+  }
 
   const currentKPI = BOPSStore.getKPIs().find((k) => k.teacherId === currentUser.id) || {
     totalScore: 96,

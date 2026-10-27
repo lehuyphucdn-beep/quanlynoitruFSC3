@@ -20,6 +20,8 @@ import { Modal } from '../../components/common/Modal';
 import { ConfirmDeleteModal } from '../../components/common/ConfirmDeleteModal';
 
 export const RoomList: React.FC = () => {
+  const currentUser = BOPSStore.getCurrentUser();
+  const isManager = currentUser?.role === 'manager';
   const [rooms, setRooms] = useState<Room[]>([]);
   const [students, setStudents] = useState<Student[]>([]);
   const [selectedBuilding, setSelectedBuilding] = useState<string>('all');
@@ -33,6 +35,8 @@ export const RoomList: React.FC = () => {
 
   // Delete Room Modal state
   const [roomToDelete, setRoomToDelete] = useState<Room | null>(null);
+  const [isDeletingRoom, setIsDeletingRoom] = useState(false);
+  const [deleteRoomError, setDeleteRoomError] = useState<string | null>(null);
 
   const [newRoomData, setNewRoomData] = useState({
     roomName: '',
@@ -73,16 +77,29 @@ export const RoomList: React.FC = () => {
   };
 
   const handleDeleteRoom = (room: Room) => {
+    setDeleteRoomError(null);
     setRoomToDelete(room);
   };
 
-  const confirmDeleteRoom = () => {
+  const confirmDeleteRoom = async () => {
     if (roomToDelete) {
-      BOPSStore.deleteRoom(roomToDelete.id);
-      if (selectedRoom?.id === roomToDelete.id) {
-        setSelectedRoom(null);
+      setIsDeletingRoom(true);
+      setDeleteRoomError(null);
+      try {
+        const res = await BOPSStore.deleteRoom(roomToDelete.id);
+        if (!res.success) {
+          setDeleteRoomError(res.error || 'Lỗi khi xóa phòng trên máy chủ.');
+          return;
+        }
+        if (selectedRoom?.id === roomToDelete.id) {
+          setSelectedRoom(null);
+        }
+        setRoomToDelete(null);
+      } catch (err: any) {
+        setDeleteRoomError(err?.message || 'Lỗi khi xóa phòng');
+      } finally {
+        setIsDeletingRoom(false);
       }
-      setRoomToDelete(null);
     }
   };
 
@@ -165,14 +182,16 @@ export const RoomList: React.FC = () => {
           </p>
         </div>
 
-        {/* Add Room Button */}
-        <button
-          onClick={() => setIsAddModalOpen(true)}
-          className="flex items-center gap-1.5 rounded-xl bg-blue-600 px-4 py-2 text-xs font-bold text-white shadow-sm hover:bg-blue-700 shrink-0 transition"
-        >
-          <Plus className="h-4 w-4" />
-          <span>+ Khai Báo Phòng KTX Mới</span>
-        </button>
+        {/* Add Room Button (Chỉ Quản lý) */}
+        {isManager && (
+          <button
+            onClick={() => setIsAddModalOpen(true)}
+            className="flex items-center gap-1.5 rounded-xl bg-blue-600 px-4 py-2 text-xs font-bold text-white shadow-sm hover:bg-blue-700 shrink-0 transition"
+          >
+            <Plus className="h-4 w-4" />
+            <span>+ Khai Báo Phòng KTX Mới</span>
+          </button>
+        )}
       </div>
 
       {/* Search & Filter Toolbar */}
@@ -281,26 +300,30 @@ export const RoomList: React.FC = () => {
                   >
                     {room.hygieneStatus === 'pass' ? 'Đạt vệ sinh' : 'Cần chấn chỉnh'}
                   </span>
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setEditingRoom(room);
-                    }}
-                    className="p-1.5 text-slate-400 hover:text-blue-600 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 transition"
-                    title="Chỉnh sửa phòng"
-                  >
-                    <Pencil className="h-3.5 w-3.5" />
-                  </button>
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      handleDeleteRoom(room);
-                    }}
-                    className="p-1.5 text-slate-400 hover:text-red-600 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 transition"
-                    title="Xóa phòng"
-                  >
-                    <Trash2 className="h-3.5 w-3.5" />
-                  </button>
+                  {isManager && (
+                    <>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setEditingRoom(room);
+                        }}
+                        className="p-1.5 text-slate-400 hover:text-blue-600 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 transition"
+                        title="Chỉnh sửa cấu hình phòng (Quản lý)"
+                      >
+                        <Pencil className="h-3.5 w-3.5" />
+                      </button>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleDeleteRoom(room);
+                        }}
+                        className="p-1.5 text-slate-400 hover:text-red-600 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 transition"
+                        title="Xóa phòng (Quản lý)"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </button>
+                    </>
+                  )}
                 </div>
               </div>
 
@@ -686,10 +709,17 @@ export const RoomList: React.FC = () => {
       {/* Delete Confirmation Modal */}
       <ConfirmDeleteModal
         isOpen={!!roomToDelete}
-        onClose={() => setRoomToDelete(null)}
+        onClose={() => {
+          if (!isDeletingRoom) {
+            setRoomToDelete(null);
+            setDeleteRoomError(null);
+          }
+        }}
         onConfirm={confirmDeleteRoom}
+        isLoading={isDeletingRoom}
+        errorMessage={deleteRoomError}
         title={`Xóa Phòng KTX "${roomToDelete?.roomName}"`}
-        message="Bạn có chắc chắn muốn xóa phòng KTX này không? Hành động này sẽ không thể hoàn tác."
+        message="Bạn có chắc chắn muốn xóa phòng KTX này không? Hành động này sẽ cập nhật trực tiếp trên máy chủ."
       />
     </div>
   );

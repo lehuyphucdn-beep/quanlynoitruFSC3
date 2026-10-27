@@ -99,7 +99,9 @@ export const ScheduleScreen: React.FC = () => {
     currentUser.fullName?.toLowerCase().includes('huỳnh hoàng khương') ||
     currentUser.fullName?.toLowerCase().includes('huynh hoang khuong');
 
-  const canEditSchedule = isManager || isAllowedTeacher;
+  // Theo phân quyền SQL RLS FSC3: Chỉ tài khoản Quản lý mới được chỉnh sửa/xóa/phân công ca trực trực tiếp.
+  // GVQN chỉ thực hiện gửi đề xuất đổi ca (status = 'swapped') thông qua nút "Đổi ca".
+  const canEditSchedule = isManager;
 
   // Search & Filter
   const [searchKeyword, setSearchKeyword] = useState('');
@@ -264,17 +266,32 @@ export const ScheduleScreen: React.FC = () => {
 
   // Delete confirmation modal state
   const [scheduleToDelete, setScheduleToDelete] = useState<ScheduleAssignment | null>(null);
+  const [isDeletingSchedule, setIsDeletingSchedule] = useState(false);
+  const [deleteScheduleError, setDeleteScheduleError] = useState<string | null>(null);
 
   // Handle deleting an assignment
   const handleDeleteSchedule = (schedule: ScheduleAssignment) => {
+    setDeleteScheduleError(null);
     setScheduleToDelete(schedule);
   };
 
-  const confirmDeleteSchedule = () => {
+  const confirmDeleteSchedule = async () => {
     if (scheduleToDelete) {
-      BOPSStore.deleteSchedule(scheduleToDelete.id);
-      setAssignments(BOPSStore.getSchedules());
-      setScheduleToDelete(null);
+      setIsDeletingSchedule(true);
+      setDeleteScheduleError(null);
+      try {
+        const res = await BOPSStore.deleteSchedule(scheduleToDelete.id);
+        if (!res.success) {
+          setDeleteScheduleError(res.error || 'Lỗi khi xóa ca trực trên máy chủ');
+          return;
+        }
+        setAssignments(BOPSStore.getSchedules());
+        setScheduleToDelete(null);
+      } catch (err: any) {
+        setDeleteScheduleError(err?.message || 'Lỗi khi xóa ca trực');
+      } finally {
+        setIsDeletingSchedule(false);
+      }
     }
   };
 
@@ -373,8 +390,7 @@ export const ScheduleScreen: React.FC = () => {
       id: `sched-nw-${Date.now()}-${idx}`,
     }));
 
-    const currentSchedules = BOPSStore.getSchedules();
-    BOPSStore.saveSchedules([...newItems, ...currentSchedules]);
+    BOPSStore.addSchedules(newItems);
 
     BOPSStore.addAuditLog(
       currentUser.id,
@@ -1247,8 +1263,15 @@ export const ScheduleScreen: React.FC = () => {
       {/* Confirm Delete Modal */}
       <ConfirmDeleteModal
         isOpen={!!scheduleToDelete}
-        onClose={() => setScheduleToDelete(null)}
+        onClose={() => {
+          if (!isDeletingSchedule) {
+            setScheduleToDelete(null);
+            setDeleteScheduleError(null);
+          }
+        }}
         onConfirm={confirmDeleteSchedule}
+        isLoading={isDeletingSchedule}
+        errorMessage={deleteScheduleError}
         title="Xác nhận xóa ca trực"
         itemName={
           scheduleToDelete

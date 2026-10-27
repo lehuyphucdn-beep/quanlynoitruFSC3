@@ -24,6 +24,7 @@ export interface User {
   assignedStudentIds: string[];
   assignedBuilding?: string;
   workloadIndex: number; // e.g. 0.82 to 1.45 calculated from students & rooms count
+  authUserId?: string;
 }
 
 export type SpecialLabel = 

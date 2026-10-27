@@ -82,6 +82,8 @@ export const StudentList: React.FC = () => {
 
   // Delete Student state
   const [studentToDelete, setStudentToDelete] = useState<Student | null>(null);
+  const [isDeletingStudent, setIsDeletingStudent] = useState(false);
+  const [deleteStudentError, setDeleteStudentError] = useState<string | null>(null);
 
   // Initial New Student Form Data
   const [newStudentData, setNewStudentData] = useState({
@@ -491,16 +493,29 @@ export const StudentList: React.FC = () => {
   };
 
   const handleDeleteStudent = (student: Student) => {
+    setDeleteStudentError(null);
     setStudentToDelete(student);
   };
 
-  const confirmDeleteStudent = () => {
+  const confirmDeleteStudent = async () => {
     if (studentToDelete) {
-      BOPSStore.deleteStudent(studentToDelete.id);
-      if (selectedStudent?.id === studentToDelete.id) {
-        setSelectedStudent(null);
+      setIsDeletingStudent(true);
+      setDeleteStudentError(null);
+      try {
+        const res = await BOPSStore.deleteStudent(studentToDelete.id);
+        if (!res.success) {
+          setDeleteStudentError(res.error || 'Lỗi khi xóa học sinh trên máy chủ.');
+          return;
+        }
+        if (selectedStudent?.id === studentToDelete.id) {
+          setSelectedStudent(null);
+        }
+        setStudentToDelete(null);
+      } catch (err: any) {
+        setDeleteStudentError(err?.message || 'Lỗi khi xóa học sinh');
+      } finally {
+        setIsDeletingStudent(false);
       }
-      setStudentToDelete(null);
     }
   };
 
@@ -883,13 +898,15 @@ export const StudentList: React.FC = () => {
                               <Pencil className="h-3.5 w-3.5" />
                               <span>Sửa</span>
                             </button>
-                            <button
-                              onClick={() => handleDeleteStudent(student)}
-                              className="p-1.5 rounded-lg text-slate-400 hover:text-red-600 dark:hover:text-red-400 hover:bg-slate-100 dark:hover:bg-slate-800 transition"
-                              title="Xóa hồ sơ học sinh"
-                            >
-                              <Trash2 className="h-4 w-4" />
-                            </button>
+                            {currentUser.role === 'manager' && (
+                              <button
+                                onClick={() => handleDeleteStudent(student)}
+                                className="p-1.5 rounded-lg text-slate-400 hover:text-red-600 dark:hover:text-red-400 hover:bg-slate-100 dark:hover:bg-slate-800 transition"
+                                title="Xóa hồ sơ học sinh (Chỉ Quản lý)"
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </button>
+                            )}
                           </>
                         ) : (
                           <span
@@ -929,6 +946,12 @@ export const StudentList: React.FC = () => {
       >
         {editingStudent && (
           <form onSubmit={handleEditStudentSubmit} className="space-y-4 text-xs">
+            {currentUser.role !== 'manager' && (
+              <div className="rounded-xl border border-amber-200 bg-amber-50 p-2.5 text-[11px] text-amber-800 dark:border-amber-900/60 dark:bg-amber-950/40 dark:text-amber-300">
+                <strong>Phân quyền SQL RLS FSC3:</strong> Giáo viên Quản nhiệm cập nhật hồ sơ sức khỏe, diện theo dõi đặc biệt (Special Care), nhãn phân loại và ghi chú chăm sóc (Mục 4). Thông tin hành chính học sinh do Quản lý quản trị.
+              </div>
+            )}
+
             {/* Group 1: Basic Identifiers */}
             <div className="rounded-2xl border border-slate-200 bg-slate-50/50 p-3.5 dark:border-slate-800 dark:bg-slate-900/40 space-y-3">
               <div className="font-bold text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
@@ -944,9 +967,10 @@ export const StudentList: React.FC = () => {
                   <input
                     type="text"
                     required
+                    disabled={currentUser.role !== 'manager'}
                     value={editingStudent.studentCode}
                     onChange={(e) => setEditingStudent({ ...editingStudent, studentCode: e.target.value })}
-                    className="w-full rounded-xl border border-slate-200 bg-white p-2.5 text-xs font-semibold focus:border-blue-500 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+                    className="w-full rounded-xl border border-slate-200 bg-white p-2.5 text-xs font-semibold focus:border-blue-500 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-white disabled:bg-slate-100 disabled:text-slate-500 disabled:cursor-not-allowed"
                   />
                 </div>
                 <div>
@@ -956,9 +980,10 @@ export const StudentList: React.FC = () => {
                   <input
                     type="text"
                     required
+                    disabled={currentUser.role !== 'manager'}
                     value={editingStudent.fullName}
                     onChange={(e) => setEditingStudent({ ...editingStudent, fullName: e.target.value })}
-                    className="w-full rounded-xl border border-slate-200 bg-white p-2.5 text-xs font-semibold focus:border-blue-500 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+                    className="w-full rounded-xl border border-slate-200 bg-white p-2.5 text-xs font-semibold focus:border-blue-500 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-white disabled:bg-slate-100 disabled:text-slate-500 disabled:cursor-not-allowed"
                   />
                 </div>
               </div>
@@ -969,11 +994,12 @@ export const StudentList: React.FC = () => {
                     Giới tính
                   </label>
                   <select
+                    disabled={currentUser.role !== 'manager'}
                     value={editingStudent.gender}
                     onChange={(e) =>
                       setEditingStudent({ ...editingStudent, gender: e.target.value as 'nam' | 'nữ' })
                     }
-                    className="w-full rounded-xl border border-slate-200 bg-white p-2.5 text-xs font-semibold focus:border-blue-500 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+                    className="w-full rounded-xl border border-slate-200 bg-white p-2.5 text-xs font-semibold focus:border-blue-500 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-white disabled:bg-slate-100 disabled:text-slate-500 disabled:cursor-not-allowed"
                   >
                     <option value="nam">Nam</option>
                     <option value="nữ">Nữ</option>
@@ -985,9 +1011,10 @@ export const StudentList: React.FC = () => {
                   </label>
                   <input
                     type="date"
+                    disabled={currentUser.role !== 'manager'}
                     value={editingStudent.birthday}
                     onChange={(e) => setEditingStudent({ ...editingStudent, birthday: e.target.value })}
-                    className="w-full rounded-xl border border-slate-200 bg-white p-2.5 text-xs font-semibold focus:border-blue-500 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+                    className="w-full rounded-xl border border-slate-200 bg-white p-2.5 text-xs font-semibold focus:border-blue-500 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-white disabled:bg-slate-100 disabled:text-slate-500 disabled:cursor-not-allowed"
                   />
                 </div>
               </div>
@@ -1005,18 +1032,20 @@ export const StudentList: React.FC = () => {
                   <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">Lớp</label>
                   <input
                     type="text"
+                    disabled={currentUser.role !== 'manager'}
                     value={editingStudent.className}
                     onChange={(e) => setEditingStudent({ ...editingStudent, className: e.target.value })}
-                    className="w-full rounded-xl border border-slate-200 bg-white p-2.5 text-xs focus:border-purple-500 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+                    className="w-full rounded-xl border border-slate-200 bg-white p-2.5 text-xs focus:border-purple-500 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-white disabled:bg-slate-100 disabled:text-slate-500 disabled:cursor-not-allowed"
                   />
                 </div>
                 <div>
                   <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">Phòng KTX</label>
                   <input
                     type="text"
+                    disabled={currentUser.role !== 'manager'}
                     value={editingStudent.roomName}
                     onChange={(e) => setEditingStudent({ ...editingStudent, roomName: e.target.value })}
-                    className="w-full rounded-xl border border-slate-200 bg-white p-2.5 text-xs focus:border-purple-500 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+                    className="w-full rounded-xl border border-slate-200 bg-white p-2.5 text-xs focus:border-purple-500 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-white disabled:bg-slate-100 disabled:text-slate-500 disabled:cursor-not-allowed"
                   />
                 </div>
                 <div>
@@ -1024,6 +1053,7 @@ export const StudentList: React.FC = () => {
                     Giáo viên Quản nhiệm
                   </label>
                   <select
+                    disabled={currentUser.role !== 'manager'}
                     value={editingStudent.teacherName}
                     onChange={(e) => {
                       const selectedName = e.target.value;
@@ -1034,7 +1064,7 @@ export const StudentList: React.FC = () => {
                         teacherId: matched?.id || editingStudent.teacherId,
                       });
                     }}
-                    className="w-full rounded-xl border border-slate-200 bg-white p-2.5 text-xs focus:border-purple-500 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+                    className="w-full rounded-xl border border-slate-200 bg-white p-2.5 text-xs focus:border-purple-500 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-white disabled:bg-slate-100 disabled:text-slate-500 disabled:cursor-not-allowed"
                   >
                     {teachers.map((t) => (
                       <option key={t.id} value={t.fullName}>
@@ -1060,9 +1090,10 @@ export const StudentList: React.FC = () => {
                   </label>
                   <input
                     type="text"
+                    disabled={currentUser.role !== 'manager'}
                     value={editingStudent.parentName || ''}
                     onChange={(e) => setEditingStudent({ ...editingStudent, parentName: e.target.value })}
-                    className="w-full rounded-xl border border-slate-200 bg-white p-2.5 text-xs focus:border-emerald-500 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+                    className="w-full rounded-xl border border-slate-200 bg-white p-2.5 text-xs focus:border-emerald-500 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-white disabled:bg-slate-100 disabled:text-slate-500 disabled:cursor-not-allowed"
                   />
                 </div>
                 <div>
@@ -1071,9 +1102,10 @@ export const StudentList: React.FC = () => {
                   </label>
                   <input
                     type="tel"
+                    disabled={currentUser.role !== 'manager'}
                     value={editingStudent.parentPhone || ''}
                     onChange={(e) => setEditingStudent({ ...editingStudent, parentPhone: e.target.value })}
-                    className="w-full rounded-xl border border-slate-200 bg-white p-2.5 text-xs focus:border-emerald-500 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+                    className="w-full rounded-xl border border-slate-200 bg-white p-2.5 text-xs focus:border-emerald-500 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-white disabled:bg-slate-100 disabled:text-slate-500 disabled:cursor-not-allowed"
                   />
                 </div>
               </div>
@@ -1580,8 +1612,15 @@ export const StudentList: React.FC = () => {
       {/* ========================================================================= */}
       <ConfirmDeleteModal
         isOpen={!!studentToDelete}
-        onClose={() => setStudentToDelete(null)}
+        onClose={() => {
+          if (!isDeletingStudent) {
+            setStudentToDelete(null);
+            setDeleteStudentError(null);
+          }
+        }}
         onConfirm={confirmDeleteStudent}
+        isLoading={isDeletingStudent}
+        errorMessage={deleteStudentError}
         title="Xác nhận xóa hồ sơ học sinh"
         itemName={studentToDelete ? `Học sinh ${studentToDelete.fullName} (${studentToDelete.studentCode})` : ''}
       />

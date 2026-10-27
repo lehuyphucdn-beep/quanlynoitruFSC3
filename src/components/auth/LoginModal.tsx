@@ -6,6 +6,7 @@ import {
   AlertCircle,
   X,
   KeyRound,
+  Loader2,
 } from 'lucide-react';
 import { User } from '../../types';
 import { BOPSStore } from '../../services/storage';
@@ -15,7 +16,7 @@ interface LoginModalProps {
   isOpen: boolean;
   onClose: () => void;
   users: User[];
-  currentUser: User;
+  currentUser: User | null;
 }
 
 export const LoginModal: React.FC<LoginModalProps> = ({
@@ -28,74 +29,57 @@ export const LoginModal: React.FC<LoginModalProps> = ({
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [loggedInUser, setLoggedInUser] = useState<User | null>(null);
   const [isChangePassOpen, setIsChangePassOpen] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
 
   if (!isOpen) return null;
 
-  const handleLoginSubmit = (e: React.FormEvent) => {
+  const handleLoginSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMessage(null);
 
-    const trimmedUser = usernameInput.trim().toLowerCase();
-    const trimmedPass = passwordInput.trim();
+    const email = usernameInput.trim();
+    const pass = passwordInput.trim();
 
-    if (!trimmedUser) {
-      setErrorMessage('Vui lòng nhập tên đăng nhập hoặc mã GVQN!');
+    if (!email) {
+      setErrorMessage('Vui lòng nhập Email FPT (@fpt.edu.vn)!');
       return;
     }
 
-    if (!trimmedPass) {
+    if (!pass) {
       setErrorMessage('Vui lòng nhập mật khẩu!');
       return;
     }
 
-    // Find matching user by username, teacherCode, email, id, or fullName
-    const foundUser = users.find((u) => {
-      const uName = (u.username || '').toLowerCase();
-      const code = (u.teacherCode || '').toLowerCase();
-      const email = (u.email || '').toLowerCase();
-      const full = (u.fullName || '').toLowerCase();
-      const uid = (u.id || '').toLowerCase();
+    setIsLoading(true);
 
-      return (
-        uName === trimmedUser ||
-        code === trimmedUser ||
-        email === trimmedUser ||
-        uid === trimmedUser ||
-        full === trimmedUser
-      );
-    });
+    try {
+      const res = await BOPSStore.loginWithSupabaseAuth(email, pass);
 
-    if (!foundUser) {
-      setErrorMessage('Tên đăng nhập không tồn tại trong hệ thống!');
-      return;
+      if (!res.success || !res.user) {
+        setErrorMessage(res.error || 'Đăng nhập không thành công. Vui lòng kiểm tra lại thông tin!');
+        setIsLoading(false);
+        return;
+      }
+
+      setLoggedInUser(res.user);
+      setIsLoading(false);
+
+      setTimeout(() => {
+        setLoggedInUser(null);
+        setUsernameInput('');
+        setPasswordInput('');
+        onClose();
+      }, 1200);
+    } catch (err: any) {
+      setErrorMessage(err?.message || 'Lỗi kết nối khi xác thực. Vui lòng thử lại!');
+    } finally {
+      // Đảm bảo nút đăng nhập không bao giờ bị treo
+      setIsLoading(false);
     }
-
-    // Verify password (matches u.password, or default '123456', or fullName)
-    const expectedPass = foundUser.password || foundUser.fullName;
-    const isPassValid =
-      trimmedPass === expectedPass ||
-      trimmedPass.toLowerCase() === expectedPass.toLowerCase() ||
-      trimmedPass === '123456' ||
-      trimmedPass.toLowerCase() === foundUser.fullName.toLowerCase();
-
-    if (!isPassValid) {
-      setErrorMessage('Mật khẩu không chính xác. Vui lòng kiểm tra lại!');
-      return;
-    }
-
-    // Success login
-    BOPSStore.setCurrentUser(foundUser.id);
-    setLoggedInUser(foundUser);
-
-    setTimeout(() => {
-      setLoggedInUser(null);
-      setUsernameInput('');
-      setPasswordInput('');
-      onClose();
-    }, 1200);
   };
 
   const handleModalClose = () => {
+    setIsLoading(false);
     setErrorMessage(null);
     setLoggedInUser(null);
     onClose();
@@ -163,21 +147,33 @@ export const LoginModal: React.FC<LoginModalProps> = ({
         ) : (
           /* Login Form */
           <form onSubmit={handleLoginSubmit} className="mt-5 space-y-4 text-xs">
-            {/* Username / Code input */}
+            {/* Pilot Banner */}
+            <div className="rounded-xl bg-blue-50 border border-blue-200 p-2.5 text-blue-900 dark:bg-blue-950/50 dark:border-blue-900 dark:text-blue-200">
+              <div className="font-extrabold flex items-center gap-1.5 text-[11px]">
+                <KeyRound className="h-3.5 w-3.5 text-blue-600 dark:text-blue-400" />
+                <span>Chế độ xác thực: Supabase Auth (Giai đoạn C1)</span>
+              </div>
+              <p className="mt-0.5 text-[10px] text-blue-700 dark:text-blue-300">
+                Tài khoản thí điểm đã kích hoạt: <strong className="font-mono">anhntl78@fpt.edu.vn</strong> (GV023)
+              </p>
+            </div>
+
+            {/* Email input */}
             <div>
               <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1.5">
-                Tài khoản / Tên đăng nhập
+                Email Đăng Nhập FPT (@fpt.edu.vn)
               </label>
               <div className="relative">
                 <input
-                  type="text"
+                  type="email"
                   value={usernameInput}
                   onChange={(e) => {
                     setUsernameInput(e.target.value);
                     if (errorMessage) setErrorMessage(null);
                   }}
-                  placeholder="Nhập tên đăng nhập hoặc mã GV..."
-                  className="w-full rounded-xl border border-slate-200 bg-white py-2.5 pl-9 pr-3 text-xs font-semibold focus:border-blue-500 focus:outline-none dark:border-slate-700 dark:bg-slate-900 dark:text-white shadow-sm"
+                  placeholder="ví dụ: anhntl78@fpt.edu.vn"
+                  disabled={isLoading}
+                  className="w-full rounded-xl border border-slate-200 bg-white py-2.5 pl-9 pr-3 text-xs font-semibold focus:border-blue-500 focus:outline-none dark:border-slate-700 dark:bg-slate-900 dark:text-white shadow-sm disabled:opacity-60"
                   autoFocus
                 />
                 <UserIcon className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
@@ -207,7 +203,8 @@ export const LoginModal: React.FC<LoginModalProps> = ({
                     if (errorMessage) setErrorMessage(null);
                   }}
                   placeholder="Nhập mật khẩu..."
-                  className="w-full rounded-xl border border-slate-200 bg-white py-2.5 pl-9 pr-3 text-xs font-semibold focus:border-blue-500 focus:outline-none dark:border-slate-700 dark:bg-slate-900 dark:text-white shadow-sm"
+                  disabled={isLoading}
+                  className="w-full rounded-xl border border-slate-200 bg-white py-2.5 pl-9 pr-3 text-xs font-semibold focus:border-blue-500 focus:outline-none dark:border-slate-700 dark:bg-slate-900 dark:text-white shadow-sm disabled:opacity-60"
                 />
                 <KeyRound className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
               </div>
@@ -218,16 +215,27 @@ export const LoginModal: React.FC<LoginModalProps> = ({
               <button
                 type="button"
                 onClick={handleModalClose}
-                className="rounded-xl border border-slate-200 px-4 py-2 font-bold text-slate-600 hover:bg-slate-100 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
+                disabled={isLoading}
+                className="rounded-xl border border-slate-200 px-4 py-2 font-bold text-slate-600 hover:bg-slate-100 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800 disabled:opacity-50"
               >
                 Hủy
               </button>
               <button
                 type="submit"
-                className="flex items-center gap-2 rounded-xl bg-blue-600 px-5 py-2 font-bold text-white shadow-md hover:bg-blue-700 transition"
+                disabled={isLoading}
+                className="flex items-center gap-2 rounded-xl bg-blue-600 px-5 py-2 font-bold text-white shadow-md hover:bg-blue-700 transition disabled:opacity-50 cursor-pointer"
               >
-                <LogIn className="h-4 w-4" />
-                <span>Đăng Nhập</span>
+                {isLoading ? (
+                  <>
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    <span>Đang xác thực...</span>
+                  </>
+                ) : (
+                  <>
+                    <LogIn className="h-4 w-4" />
+                    <span>Đăng Nhập</span>
+                  </>
+                )}
               </button>
             </div>
           </form>

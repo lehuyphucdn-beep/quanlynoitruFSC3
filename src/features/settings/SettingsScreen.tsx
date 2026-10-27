@@ -12,6 +12,8 @@ import {
   Copy,
   Edit2,
   X,
+  AlertTriangle,
+  Info,
 } from 'lucide-react';
 import { BOPSStore, subscribeToStore } from '../../services/storage';
 import { User } from '../../types';
@@ -33,20 +35,15 @@ export const SettingsScreen: React.FC = () => {
     setEditingPasswords((prev) => ({ ...prev, [userId]: val }));
   };
 
-  const handleSaveUserPassword = (user: User) => {
-    const newPass = (editingPasswords[user.id] || '').trim();
-    if (!newPass) return;
-
-    const updated = { ...user, password: newPass };
-    BOPSStore.updateUser(updated);
-
-    setSavedSuccessMsg(`Đã cập nhật mật khẩu cho "${user.fullName}" thành: "${newPass}"`);
-    setTimeout(() => setSavedSuccessMsg(null), 3000);
+  const handleSaveUserPassword = (_user: User) => {
+    setSavedSuccessMsg(
+      'Tính năng cập nhật mật khẩu tập trung tạm thời bị khóa vì lý do an toàn. Hệ thống không lưu mật khẩu thô trong cơ sở dữ liệu. Vui lòng hướng dẫn người dùng tự đổi mật khẩu cá nhân qua Supabase Auth.'
+    );
+    setTimeout(() => setSavedSuccessMsg(null), 5000);
   };
 
   const handleCopyAccount = (u: User) => {
-    const pass = editingPasswords[u.id] || u.password || u.fullName;
-    const text = `Tài khoản: ${u.username || u.teacherCode} | Mật khẩu: ${pass} | Tên: ${u.fullName}`;
+    const text = `Tài khoản: ${u.username || u.teacherCode} | Email: ${u.email} | Họ và tên: ${u.fullName} (Xác thực qua Supabase Auth)`;
     navigator.clipboard.writeText(text);
     setCopiedId(u.id);
     setTimeout(() => setCopiedId(null), 2000);
@@ -83,16 +80,21 @@ export const SettingsScreen: React.FC = () => {
       </div>
 
       <div className="max-w-4xl space-y-6 text-xs">
-        {/* Account Password Manager Card */}
-        <div className="rounded-3xl border border-amber-200 bg-amber-50/40 p-5 shadow-sm dark:border-amber-900/60 dark:bg-slate-900 space-y-4">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-amber-200/60 pb-3 dark:border-slate-800">
+        {/* Account Password Manager Card - Hardened in C2 */}
+        <div className="rounded-3xl border border-slate-200 bg-slate-50/50 p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900 space-y-4">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-200/80 pb-3 dark:border-slate-800">
             <div>
-              <h3 className="font-extrabold text-slate-900 dark:text-white text-sm flex items-center gap-2">
-                <KeyRound className="h-4 w-4 text-amber-600" />
-                Quản Lý Mật Khẩu Đăng Nhập Tất Cả Tài Khoản ({users.length})
-              </h3>
+              <div className="flex items-center gap-2">
+                <h3 className="font-extrabold text-slate-900 dark:text-white text-sm flex items-center gap-2">
+                  <KeyRound className="h-4 w-4 text-slate-600 dark:text-slate-400" />
+                  Danh Sách Tài Khoản & Cơ Chế Xác Thực ({users.length})
+                </h3>
+                <span className="rounded-full bg-emerald-100 px-2.5 py-0.5 text-[10px] font-bold text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300 flex items-center gap-1">
+                  <ShieldCheck className="h-3 w-3" /> Supabase Auth
+                </span>
+              </div>
               <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
-                Xem và thay đổi trực tiếp mật khẩu của Quản lý và tất cả Giáo viên Quản nhiệm
+                Thông tin hồ sơ cán bộ, giáo viên. Mật khẩu được mã hóa an toàn trên máy chủ xác thực Supabase Auth.
               </p>
             </div>
 
@@ -103,15 +105,22 @@ export const SettingsScreen: React.FC = () => {
                 value={searchAccount}
                 onChange={(e) => setSearchAccount(e.target.value)}
                 placeholder="Tìm tên, mã GV, tài khoản..."
-                className="w-full rounded-xl border border-amber-200 bg-white py-1.5 pl-8 pr-3 text-xs font-semibold focus:border-amber-500 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+                className="w-full rounded-xl border border-slate-200 bg-white py-1.5 pl-8 pr-3 text-xs font-semibold focus:border-amber-500 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-white"
               />
               <Search className="absolute left-2.5 top-2 h-3.5 w-3.5 text-slate-400" />
             </div>
           </div>
 
+          <div className="rounded-xl border border-amber-200/80 bg-amber-50/80 p-3 text-[11px] text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/40 dark:text-amber-200 flex items-start gap-2">
+            <Info className="h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400 mt-0.5" />
+            <div className="leading-relaxed">
+              <strong>Chính sách bảo mật C2:</strong> Không lưu trữ và không chỉnh sửa mật khẩu văn bản thô trực tiếp trên danh sách này. Người dùng tự đổi mật khẩu cho tài khoản của mình sau khi đăng nhập thông qua nút <strong>Đổi mật khẩu</strong> trên thanh tiêu đề.
+            </div>
+          </div>
+
           {savedSuccessMsg && (
-            <div className="p-3 rounded-2xl bg-emerald-100 text-emerald-900 font-bold text-xs dark:bg-emerald-950 dark:text-emerald-200 flex items-center gap-2">
-              <Check className="h-4 w-4 shrink-0 text-emerald-600" />
+            <div className="p-3 rounded-2xl bg-amber-100 text-amber-900 font-bold text-xs dark:bg-amber-950 dark:text-amber-200 flex items-center gap-2">
+              <AlertTriangle className="h-4 w-4 shrink-0 text-amber-600" />
               <span>{savedSuccessMsg}</span>
             </div>
           )}
@@ -119,20 +128,16 @@ export const SettingsScreen: React.FC = () => {
           {/* User Passwords List */}
           <div className="space-y-2 max-h-96 overflow-y-auto pr-1">
             {filteredUsers.map((u) => {
-              const currentPass = u.password || u.fullName;
-              const inputValue = editingPasswords[u.id] ?? currentPass;
-              const isModified = inputValue !== currentPass;
-
               return (
                 <div
                   key={u.id}
-                  className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 p-3 rounded-2xl bg-white border border-amber-200/70 dark:bg-slate-800 dark:border-slate-700 hover:border-amber-400 transition shadow-sm"
+                  className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 p-3 rounded-2xl bg-white border border-slate-200/80 dark:bg-slate-800 dark:border-slate-700 hover:border-slate-300 transition shadow-sm"
                 >
                   <div className="flex items-center gap-3 min-w-0">
                     <img
                       src={u.avatar}
                       alt={u.fullName}
-                      className="h-8 w-8 rounded-full object-cover ring-2 ring-amber-500/20 shrink-0"
+                      className="h-8 w-8 rounded-full object-cover ring-2 ring-slate-200 dark:ring-slate-700 shrink-0"
                     />
                     <div className="min-w-0">
                       <div className="font-bold text-slate-900 dark:text-white text-xs truncate flex items-center gap-1.5">
@@ -144,50 +149,33 @@ export const SettingsScreen: React.FC = () => {
                         )}
                       </div>
                       <div className="text-[10px] text-slate-500 dark:text-slate-400 font-mono truncate">
-                        TK: <strong className="text-blue-600 dark:text-blue-400">{u.username || u.teacherCode}</strong> • Mã GV: {u.teacherCode || 'N/A'}
+                        TK: <strong className="text-blue-600 dark:text-blue-400">{u.username || u.teacherCode}</strong> • Mã GV: {u.teacherCode || 'N/A'} • Email: {u.email}
                       </div>
                     </div>
                   </div>
 
-                  {/* Password Input & Save Action */}
+                  {/* Auth Security Status & Copy Action */}
                   <div className="flex items-center gap-2 shrink-0">
-                    <div className="relative">
-                      <input
-                        type="text"
-                        value={inputValue}
-                        onChange={(e) => handlePasswordInputChange(u.id, e.target.value)}
-                        className={`w-36 sm:w-44 rounded-xl border px-3 py-1.5 text-xs font-mono font-bold shadow-inner focus:outline-none ${
-                          isModified
-                            ? 'border-amber-500 bg-amber-50 text-amber-900 dark:bg-amber-950/80 dark:text-amber-200'
-                            : 'border-slate-200 bg-slate-50 text-slate-800 dark:border-slate-700 dark:bg-slate-900 dark:text-white'
-                        }`}
-                      />
-                    </div>
-
-                    <button
-                      type="button"
-                      onClick={() => handleSaveUserPassword(u)}
-                      disabled={!isModified || !inputValue.trim()}
-                      className={`flex items-center gap-1 rounded-xl px-3 py-1.5 font-bold transition text-xs ${
-                        isModified && inputValue.trim()
-                          ? 'bg-amber-600 text-white hover:bg-amber-700 shadow-md'
-                          : 'bg-slate-200 text-slate-400 dark:bg-slate-700 dark:text-slate-500 cursor-not-allowed'
-                      }`}
-                    >
-                      <Check className="h-3.5 w-3.5" />
-                      <span>Lưu</span>
-                    </button>
+                    <span className="text-[11px] font-mono text-slate-400 px-2 py-1 bg-slate-50 dark:bg-slate-900 rounded-lg border border-slate-200 dark:border-slate-700">
+                      ●●●●●●●●
+                    </span>
 
                     <button
                       type="button"
                       onClick={() => handleCopyAccount(u)}
-                      className="rounded-xl border border-slate-200 p-1.5 text-slate-500 hover:bg-slate-100 dark:border-slate-700 dark:hover:bg-slate-700 dark:text-slate-300"
+                      className="flex items-center gap-1 rounded-xl border border-slate-200 px-2.5 py-1.5 text-slate-600 hover:bg-slate-100 dark:border-slate-700 dark:hover:bg-slate-700 dark:text-slate-300 text-xs font-semibold"
                       title="Sao chép thông tin tài khoản"
                     >
                       {copiedId === u.id ? (
-                        <Check className="h-3.5 w-3.5 text-emerald-600" />
+                        <>
+                          <Check className="h-3.5 w-3.5 text-emerald-600" />
+                          <span className="text-emerald-600">Đã chép</span>
+                        </>
                       ) : (
-                        <Copy className="h-3.5 w-3.5" />
+                        <>
+                          <Copy className="h-3.5 w-3.5" />
+                          <span>Sao chép</span>
+                        </>
                       )}
                     </button>
                   </div>

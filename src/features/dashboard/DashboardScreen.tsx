@@ -79,6 +79,8 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ setActiveModul
   // Edit Student Modal state
   const [editingStudent, setEditingStudent] = useState<Student | null>(null);
   const [studentToDelete, setStudentToDelete] = useState<Student | null>(null);
+  const [isDeletingStudent, setIsDeletingStudent] = useState(false);
+  const [deleteStudentError, setDeleteStudentError] = useState<string | null>(null);
   const [viewingStudentProfile, setViewingStudentProfile] = useState<Student | null>(null);
 
   // Excel Upload state in Dashboard
@@ -435,15 +437,26 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ setActiveModul
     setEditingStudent(null);
   };
 
-  const confirmDeleteStudent = () => {
+  const confirmDeleteStudent = async () => {
     if (studentToDelete) {
       if (!canEditStudent(studentToDelete)) {
-        alert('Bạn không có quyền xóa học sinh này!');
-        setStudentToDelete(null);
+        setDeleteStudentError('Bạn không có quyền xóa học sinh này!');
         return;
       }
-      BOPSStore.deleteStudent(studentToDelete.id);
-      setStudentToDelete(null);
+      setIsDeletingStudent(true);
+      setDeleteStudentError(null);
+      try {
+        const res = await BOPSStore.deleteStudent(studentToDelete.id);
+        if (!res.success) {
+          setDeleteStudentError(res.error || 'Lỗi khi xóa học sinh trên máy chủ.');
+          return;
+        }
+        setStudentToDelete(null);
+      } catch (err: any) {
+        setDeleteStudentError(err?.message || 'Lỗi khi xóa học sinh');
+      } finally {
+        setIsDeletingStudent(false);
+      }
     }
   };
 
@@ -1147,6 +1160,12 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ setActiveModul
       >
         {editingStudent && (
           <form onSubmit={handleEditStudentSubmit} className="space-y-4 text-xs">
+            {!isManager && (
+              <div className="rounded-xl border border-amber-200 bg-amber-50 p-2.5 text-[11px] text-amber-800 dark:border-amber-900/60 dark:bg-amber-950/40 dark:text-amber-300">
+                <strong>Phân quyền SQL RLS FSC3:</strong> Giáo viên Quản nhiệm cập nhật hồ sơ sức khỏe, diện theo dõi đặc biệt (Special Care), nhãn phân loại và ghi chú chăm sóc (Mục 4). Thông tin hành chính học sinh do Quản lý quản trị.
+              </div>
+            )}
+
             {/* Group 1: Basic Identifiers */}
             <div className="rounded-2xl border border-slate-200 bg-slate-50/50 p-3.5 dark:border-slate-800 dark:bg-slate-900/40 space-y-3">
               <div className="font-bold text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
@@ -1162,9 +1181,10 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ setActiveModul
                   <input
                     type="text"
                     required
+                    disabled={!isManager}
                     value={editingStudent.studentCode}
                     onChange={(e) => setEditingStudent({ ...editingStudent, studentCode: e.target.value })}
-                    className="w-full rounded-xl border border-slate-200 bg-white p-2.5 text-xs font-semibold focus:border-blue-500 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+                    className="w-full rounded-xl border border-slate-200 bg-white p-2.5 text-xs font-semibold focus:border-blue-500 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-white disabled:bg-slate-100 disabled:text-slate-500 disabled:cursor-not-allowed"
                   />
                 </div>
                 <div>
@@ -1174,9 +1194,10 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ setActiveModul
                   <input
                     type="text"
                     required
+                    disabled={!isManager}
                     value={editingStudent.fullName}
                     onChange={(e) => setEditingStudent({ ...editingStudent, fullName: e.target.value })}
-                    className="w-full rounded-xl border border-slate-200 bg-white p-2.5 text-xs font-semibold focus:border-blue-500 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+                    className="w-full rounded-xl border border-slate-200 bg-white p-2.5 text-xs font-semibold focus:border-blue-500 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-white disabled:bg-slate-100 disabled:text-slate-500 disabled:cursor-not-allowed"
                   />
                 </div>
               </div>
@@ -1185,11 +1206,12 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ setActiveModul
                 <div>
                   <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">Giới tính</label>
                   <select
+                    disabled={!isManager}
                     value={editingStudent.gender}
                     onChange={(e) =>
                       setEditingStudent({ ...editingStudent, gender: e.target.value as 'nam' | 'nữ' })
                     }
-                    className="w-full rounded-xl border border-slate-200 bg-white p-2.5 text-xs font-semibold focus:border-blue-500 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+                    className="w-full rounded-xl border border-slate-200 bg-white p-2.5 text-xs font-semibold focus:border-blue-500 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-white disabled:bg-slate-100 disabled:text-slate-500 disabled:cursor-not-allowed"
                   >
                     <option value="nam">Nam</option>
                     <option value="nữ">Nữ</option>
@@ -1201,9 +1223,10 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ setActiveModul
                   </label>
                   <input
                     type="date"
+                    disabled={!isManager}
                     value={editingStudent.birthday}
                     onChange={(e) => setEditingStudent({ ...editingStudent, birthday: e.target.value })}
-                    className="w-full rounded-xl border border-slate-200 bg-white p-2.5 text-xs font-semibold focus:border-blue-500 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+                    className="w-full rounded-xl border border-slate-200 bg-white p-2.5 text-xs font-semibold focus:border-blue-500 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-white disabled:bg-slate-100 disabled:text-slate-500 disabled:cursor-not-allowed"
                   />
                 </div>
               </div>
@@ -1221,18 +1244,20 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ setActiveModul
                   <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">Lớp</label>
                   <input
                     type="text"
+                    disabled={!isManager}
                     value={editingStudent.className}
                     onChange={(e) => setEditingStudent({ ...editingStudent, className: e.target.value })}
-                    className="w-full rounded-xl border border-slate-200 bg-white p-2.5 text-xs focus:border-purple-500 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+                    className="w-full rounded-xl border border-slate-200 bg-white p-2.5 text-xs focus:border-purple-500 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-white disabled:bg-slate-100 disabled:text-slate-500 disabled:cursor-not-allowed"
                   />
                 </div>
                 <div>
                   <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">Phòng KTX</label>
                   <input
                     type="text"
+                    disabled={!isManager}
                     value={editingStudent.roomName}
                     onChange={(e) => setEditingStudent({ ...editingStudent, roomName: e.target.value })}
-                    className="w-full rounded-xl border border-slate-200 bg-white p-2.5 text-xs focus:border-purple-500 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+                    className="w-full rounded-xl border border-slate-200 bg-white p-2.5 text-xs focus:border-purple-500 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-white disabled:bg-slate-100 disabled:text-slate-500 disabled:cursor-not-allowed"
                   />
                 </div>
                 <div>
@@ -1240,6 +1265,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ setActiveModul
                     Giáo viên Quản nhiệm
                   </label>
                   <select
+                    disabled={!isManager}
                     value={editingStudent.teacherName}
                     onChange={(e) => {
                       const selectedName = e.target.value;
@@ -1250,7 +1276,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ setActiveModul
                         teacherId: matched?.id || editingStudent.teacherId,
                       });
                     }}
-                    className="w-full rounded-xl border border-slate-200 bg-white p-2.5 text-xs focus:border-purple-500 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+                    className="w-full rounded-xl border border-slate-200 bg-white p-2.5 text-xs focus:border-purple-500 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-white disabled:bg-slate-100 disabled:text-slate-500 disabled:cursor-not-allowed"
                   >
                     {users.filter(u => u.role === 'teacher').map((t) => (
                       <option key={t.id} value={t.fullName}>
@@ -1276,9 +1302,10 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ setActiveModul
                   </label>
                   <input
                     type="text"
+                    disabled={!isManager}
                     value={editingStudent.parentName || ''}
                     onChange={(e) => setEditingStudent({ ...editingStudent, parentName: e.target.value })}
-                    className="w-full rounded-xl border border-slate-200 bg-white p-2.5 text-xs focus:border-emerald-500 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+                    className="w-full rounded-xl border border-slate-200 bg-white p-2.5 text-xs focus:border-emerald-500 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-white disabled:bg-slate-100 disabled:text-slate-500 disabled:cursor-not-allowed"
                   />
                 </div>
                 <div>
@@ -1287,9 +1314,10 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ setActiveModul
                   </label>
                   <input
                     type="tel"
+                    disabled={!isManager}
                     value={editingStudent.parentPhone || ''}
                     onChange={(e) => setEditingStudent({ ...editingStudent, parentPhone: e.target.value })}
-                    className="w-full rounded-xl border border-slate-200 bg-white p-2.5 text-xs focus:border-emerald-500 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+                    className="w-full rounded-xl border border-slate-200 bg-white p-2.5 text-xs focus:border-emerald-500 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-white disabled:bg-slate-100 disabled:text-slate-500 disabled:cursor-not-allowed"
                   />
                 </div>
               </div>
@@ -1439,17 +1467,19 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ setActiveModul
 
             {/* Footer Buttons */}
             <div className="pt-3 border-t border-slate-200 dark:border-slate-800 flex items-center justify-between gap-2">
-              <button
-                type="button"
-                onClick={() => {
-                  setStudentToDelete(editingStudent);
-                  setEditingStudent(null);
-                }}
-                className="rounded-xl bg-red-50 text-red-600 dark:bg-red-950/60 dark:text-red-300 px-3 py-2 text-xs font-bold hover:bg-red-100 dark:hover:bg-red-900 transition flex items-center gap-1"
-              >
-                <Trash2 className="h-3.5 w-3.5" />
-                <span>Xóa Hồ Sơ</span>
-              </button>
+              {isManager ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setStudentToDelete(editingStudent);
+                    setEditingStudent(null);
+                  }}
+                  className="rounded-xl bg-red-50 text-red-600 dark:bg-red-950/60 dark:text-red-300 px-3 py-2 text-xs font-bold hover:bg-red-100 dark:hover:bg-red-900 transition flex items-center gap-1"
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                  <span>Xóa Hồ Sơ</span>
+                </button>
+              ) : <div />}
 
               <div className="flex gap-2">
                 <button
@@ -1534,8 +1564,15 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ setActiveModul
       {/* Confirm Delete Modal */}
       <ConfirmDeleteModal
         isOpen={!!studentToDelete}
-        onClose={() => setStudentToDelete(null)}
+        onClose={() => {
+          if (!isDeletingStudent) {
+            setStudentToDelete(null);
+            setDeleteStudentError(null);
+          }
+        }}
         onConfirm={confirmDeleteStudent}
+        isLoading={isDeletingStudent}
+        errorMessage={deleteStudentError}
         title="Xác nhận xóa hồ sơ học sinh"
         itemName={studentToDelete ? `Học sinh ${studentToDelete.fullName} (${studentToDelete.studentCode})` : ''}
       />

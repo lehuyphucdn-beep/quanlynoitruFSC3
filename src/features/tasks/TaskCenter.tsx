@@ -51,6 +51,8 @@ export const TaskCenter: React.FC = () => {
 
   // Delete Task state
   const [taskToDelete, setTaskToDelete] = useState<TaskInstance | null>(null);
+  const [isDeletingTask, setIsDeletingTask] = useState(false);
+  const [deleteTaskError, setDeleteTaskError] = useState<string | null>(null);
 
   // Evaluation Modal state
   const [evaluationItem, setEvaluationItem] = useState<WorkEvaluationItem | null>(null);
@@ -96,13 +98,26 @@ export const TaskCenter: React.FC = () => {
   };
 
   const handleDeleteTask = (task: TaskInstance) => {
+    setDeleteTaskError(null);
     setTaskToDelete(task);
   };
 
-  const confirmDeleteTask = () => {
+  const confirmDeleteTask = async () => {
     if (taskToDelete) {
-      BOPSStore.deleteTask(taskToDelete.id);
-      setTaskToDelete(null);
+      setIsDeletingTask(true);
+      setDeleteTaskError(null);
+      try {
+        const res = await BOPSStore.deleteTask(taskToDelete.id);
+        if (!res.success) {
+          setDeleteTaskError(res.error || 'Lỗi khi xóa nhiệm vụ trên máy chủ');
+          return;
+        }
+        setTaskToDelete(null);
+      } catch (err: any) {
+        setDeleteTaskError(err?.message || 'Lỗi khi xóa nhiệm vụ');
+      } finally {
+        setIsDeletingTask(false);
+      }
     }
   };
   const [newTaskData, setNewTaskData] = useState({
@@ -211,13 +226,15 @@ export const TaskCenter: React.FC = () => {
 
         {/* Action & Filter Pills */}
         <div className="flex flex-wrap items-center gap-2">
-          <button
-            onClick={() => setIsAddModalOpen(true)}
-            className="flex items-center gap-1.5 rounded-xl bg-blue-600 px-3.5 py-1.5 text-xs font-bold text-white shadow-sm hover:bg-blue-700 shrink-0"
-          >
-            <Plus className="h-4 w-4" />
-            <span>Giao Checklist Mới</span>
-          </button>
+          {currentUser.role === 'manager' && (
+            <button
+              onClick={() => setIsAddModalOpen(true)}
+              className="flex items-center gap-1.5 rounded-xl bg-blue-600 px-3.5 py-1.5 text-xs font-bold text-white shadow-sm hover:bg-blue-700 shrink-0"
+            >
+              <Plus className="h-4 w-4" />
+              <span>Giao Checklist Mới</span>
+            </button>
+          )}
 
           {['all', 'morning', 'lunch', 'afternoon', 'evening', 'night'].map((sh) => (
             <button
@@ -339,20 +356,24 @@ export const TaskCenter: React.FC = () => {
                       {task.status === 'verified' ? 'Đã duyệt' : task.status === 'rejected' ? 'Chưa tốt' : task.status}
                     </span>
 
-                    <button
-                      onClick={() => setEditingTask(task)}
-                      className="p-1.5 text-slate-400 hover:text-blue-600 dark:hover:text-blue-400 transition"
-                      title="Chỉnh sửa nhiệm vụ"
-                    >
-                      <Pencil className="h-4 w-4" />
-                    </button>
-                    <button
-                      onClick={() => handleDeleteTask(task)}
-                      className="p-1.5 text-slate-400 hover:text-red-600 dark:hover:text-red-400 transition"
-                      title="Xóa nhiệm vụ"
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </button>
+                    {currentUser.role === 'manager' && (
+                      <>
+                        <button
+                          onClick={() => setEditingTask(task)}
+                          className="p-1.5 text-slate-400 hover:text-blue-600 dark:hover:text-blue-400 transition"
+                          title="Chỉnh sửa nhiệm vụ (Quản lý)"
+                        >
+                          <Pencil className="h-4 w-4" />
+                        </button>
+                        <button
+                          onClick={() => handleDeleteTask(task)}
+                          className="p-1.5 text-slate-400 hover:text-red-600 dark:hover:text-red-400 transition"
+                          title="Xóa nhiệm vụ (Quản lý)"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </button>
+                      </>
+                    )}
                   </div>
                 </div>
               </div>
@@ -646,8 +667,15 @@ export const TaskCenter: React.FC = () => {
       {/* Confirm Delete Task Modal */}
       <ConfirmDeleteModal
         isOpen={!!taskToDelete}
-        onClose={() => setTaskToDelete(null)}
+        onClose={() => {
+          if (!isDeletingTask) {
+            setTaskToDelete(null);
+            setDeleteTaskError(null);
+          }
+        }}
         onConfirm={confirmDeleteTask}
+        isLoading={isDeletingTask}
+        errorMessage={deleteTaskError}
         title="Xác nhận xóa nhiệm vụ"
         itemName={taskToDelete ? `Nhiệm vụ "${taskToDelete.title || taskToDelete.taskName}"` : ''}
       />

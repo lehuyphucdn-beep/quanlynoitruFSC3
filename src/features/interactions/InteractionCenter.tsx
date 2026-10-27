@@ -252,14 +252,18 @@ export const InteractionCenter: React.FC = () => {
     setPriority('medium');
   };
 
-  const handleDeleteInteraction = (item: Interaction1on1) => {
+  const handleDeleteInteraction = async (item: Interaction1on1) => {
     if (
       confirm(
         `Bạn có chắc chắn muốn xóa nhật ký tương tác 1-1 của học sinh "${item.studentName}" (Chủ đề: ${item.topic}) không?`
       )
     ) {
-      BOPSStore.deleteInteraction(item.id);
-      showToast(`Đã xóa nhật ký tương tác của học sinh "${item.studentName}"`);
+      const res = await BOPSStore.deleteInteraction(item.id);
+      if (res.success) {
+        showToast(`Đã xóa nhật ký tương tác của học sinh "${item.studentName}"`);
+      } else {
+        alert(`Không thể xóa nhật ký tương tác: ${res.error || 'Lỗi kết nối máy chủ'}`);
+      }
     }
   };
 
