@@ -1180,18 +1180,29 @@ export async function restoreAuthSession(): Promise<void> {
     // 1. ÄÄƒng kÃ½ listener onAuthStateChange má»™t láº§n duy nháº¥t
     if (!authListenerRegistered) {
       authListenerRegistered = true;
-      supabase.auth.onAuthStateChange(async (event, session) => {
+      supabase.auth.onAuthStateChange((event, session) => {
         if (event === 'PASSWORD_RECOVERY') {
           isPasswordRecovery = true;
           try {
             window.history.replaceState(null, '', window.location.pathname);
           } catch {}
-          if (session?.user?.id) {
-            await syncAuthSession(session.user.id);
-          }
-          state.isAuthChecking = false;
-          notifySubscribers();
-          return;
+         if (session?.user?.id) {
+  const userId = session.user.id;
+  setTimeout(() => {
+    void syncAuthSession(userId)
+      .catch((err) => {
+        console.error('[BOPS Auth] Lỗi đồng bộ recovery session:', err);
+      })
+      .finally(() => {
+        state.isAuthChecking = false;
+        notifySubscribers();
+      });
+  }, 0);
+} else {
+  state.isAuthChecking = false;
+  notifySubscribers();
+}
+return;
         }
 
         if (event === 'SIGNED_OUT' || !session?.user?.id) {
@@ -1214,9 +1225,17 @@ export async function restoreAuthSession(): Promise<void> {
           event === 'INITIAL_SESSION' ||
           event === 'USER_UPDATED'
         ) {
-          await syncAuthSession(session.user.id);
-          state.isAuthChecking = false;
-          notifySubscribers();
+                    const userId = session.user.id;
+          setTimeout(() => {
+            void syncAuthSession(userId)
+              .catch((err) => {
+                console.error('[BOPS Auth] Lỗi đồng bộ Auth session:', err);
+              })
+              .finally(() => {
+                state.isAuthChecking = false;
+                notifySubscribers();
+              });
+          }, 0);
         }
       });
     }
