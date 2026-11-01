@@ -72,7 +72,6 @@ export const InteractionCenter: React.FC = () => {
   // Manager can view / interact with all students
   const canTeacherAccessStudent = (s: Student) => {
     if (isManager) return true;
-    if (s.uploadedByUserId === currentUser.id) return true;
     if (s.teacherId === currentUser.id) return true;
     if (
       s.teacherName &&
@@ -83,8 +82,7 @@ export const InteractionCenter: React.FC = () => {
     }
     if (
       currentUser.teacherCode &&
-      (s.teacherName?.toLowerCase().includes(currentUser.teacherCode.toLowerCase()) ||
-        s.uploadedByUserName?.toLowerCase().includes(currentUser.teacherCode.toLowerCase()))
+      s.teacherName?.toLowerCase().includes(currentUser.teacherCode.toLowerCase())
     ) {
       return true;
     }
@@ -92,11 +90,7 @@ export const InteractionCenter: React.FC = () => {
   };
 
   const availableStudentsForCurrentTeacher = students.filter(canTeacherAccessStudent);
-  // In case teacher has no explicitly assigned students yet, fallback to all so they can select
-  const studentChoices =
-    isManager || availableStudentsForCurrentTeacher.length > 0
-      ? availableStudentsForCurrentTeacher
-      : students;
+  const studentChoices = isManager ? students : availableStudentsForCurrentTeacher;
 
   // Interaction logs visible to current user:
   // Teacher: ONLY sees interactions performed by themselves
@@ -850,7 +844,7 @@ export const InteractionCenter: React.FC = () => {
             </select>
             {!isManager && availableStudentsForCurrentTeacher.length === 0 && (
               <p className="mt-1 text-[11px] text-amber-600 dark:text-amber-400">
-                Lưu ý: Thầy/Cô chưa có học sinh gán riêng. Đang hiển thị danh sách chung để Thầy/Cô chọn tương tác.
+                Thầy/Cô hiện chưa có học sinh nào được phân công phụ trách. Vui lòng liên hệ Quản lý để được phân công học sinh trước khi nhập Tương tác 1-1.
               </p>
             )}
           </div>
