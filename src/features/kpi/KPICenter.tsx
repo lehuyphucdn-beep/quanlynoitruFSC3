@@ -26,6 +26,12 @@ import {
 import { BOPSStore, subscribeToStore } from '../../services/storage';
 import { KPIRecord, User, DailyEvaluation } from '../../types';
 import { Modal } from '../../components/common/Modal';
+import { formatDateVN } from '../../utils/dateUtils';
+
+// Helper alias format ngày hiển thị theo chuẩn Việt Nam dd/MM/yyyy
+const formatDateToVN = (dateStr?: string | null): string => {
+  return formatDateVN(dateStr);
+};
 
 export const KPICenter: React.FC = () => {
   const [currentUser, setCurrentUser] = useState<User>(BOPSStore.getCurrentUser());
@@ -170,7 +176,7 @@ export const KPICenter: React.FC = () => {
           rank: r,
           evaluatedShiftsCount: count,
           isEvaluated: true,
-          generalComment: `Tổng kết tuần (${monStr} đến ${sunStr}): Đã thẩm định ${count} ca trực.`,
+          generalComment: `Tổng kết tuần (${formatDateVN(monStr)} đến ${formatDateVN(sunStr)}): Đã thẩm định ${count} ca trực.`,
           strengths: 'Duy trì nền nếp ca trực và chăm sóc học sinh nội trú toàn trường.',
           improvements: '',
           evaluatedAt: evalsInWeek[0].evaluatedAt,
@@ -430,7 +436,7 @@ export const KPICenter: React.FC = () => {
             <Award className="h-4 w-4" />
             <span>Hệ Thống Đánh Giá KPI & Xếp Hạng • Quản Trị Học Sinh Nội Trú Toàn Trường</span>
           </div>
-          <h2 className="text-xl font-extrabold text-slate-900 dark:text-white mt-1">
+          <h2 className="text-xl font-extrabold text-slate-900 dark:text-amber-300 mt-1">
             {isManager
               ? 'Thẩm Định & Bảng Xếp Hạng KPI Giáo Viên Quản Nhiệm'
               : 'Hiệu Suất KPI & Bảng Xếp Hạng Của Bạn'}
@@ -444,14 +450,20 @@ export const KPICenter: React.FC = () => {
 
         {/* Date Selector & Today button */}
         <div className="flex items-center gap-2">
-          <div className="flex items-center gap-1.5 rounded-2xl bg-white px-3 py-1.5 border border-slate-200 shadow-sm dark:bg-slate-800 dark:border-slate-700">
-            <Calendar className="h-4 w-4 text-blue-600 dark:text-blue-400" />
+          <div className="relative flex items-center gap-2 rounded-2xl bg-white px-3 py-1.5 border border-slate-200 shadow-sm dark:bg-slate-800 dark:border-slate-700 hover:border-blue-400 transition cursor-pointer">
+            <Calendar className="h-4 w-4 text-blue-600 dark:text-blue-400 shrink-0" />
             <span className="text-xs font-semibold text-slate-700 dark:text-slate-300">Ngày đối soát:</span>
+            <span className="text-xs font-bold text-blue-700 dark:text-blue-300 font-mono">
+              {formatDateToVN(selectedDate)}
+            </span>
             <input
               type="date"
               value={selectedDate}
-              onChange={(e) => setSelectedDate(e.target.value)}
-              className="bg-transparent text-xs font-bold text-slate-900 focus:outline-none dark:text-white"
+              onChange={(e) => {
+                if (e.target.value) setSelectedDate(e.target.value);
+              }}
+              className="absolute inset-0 opacity-0 cursor-pointer w-full h-full"
+              title="Nhấp để chọn ngày đối soát"
             />
           </div>
           {selectedDate !== todayStr && (
@@ -468,17 +480,17 @@ export const KPICenter: React.FC = () => {
       {/* ============================================================== */}
       {/* TIMEFRAME SWITCHER BAR: HẰNG NGÀY / HẰNG TUẦN / HẰNG THÁNG      */}
       {/* ============================================================== */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white p-3.5 rounded-3xl border border-slate-200 shadow-sm dark:bg-slate-900 dark:border-slate-800">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white p-3 rounded-2xl border border-slate-200/90 shadow-xs dark:bg-slate-900 dark:border-slate-800">
         <div className="flex items-center gap-2">
-          <span className="text-xs font-extrabold text-slate-800 dark:text-slate-200">
+          <span className="text-xs font-bold text-slate-800 dark:text-slate-200">
             Chu kỳ thống kê:
           </span>
-          <div className="flex items-center rounded-2xl bg-slate-100 p-1 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs">
+          <div className="flex items-center rounded-xl bg-slate-100 p-1 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs">
             <button
               onClick={() => setTimeframe('day')}
               className={`flex items-center gap-1.5 rounded-xl px-3.5 py-1.5 font-bold transition ${
                 timeframe === 'day'
-                  ? 'bg-amber-600 text-white shadow-sm'
+                  ? 'bg-blue-600 text-white shadow-sm'
                   : 'text-slate-600 hover:text-slate-900 dark:text-slate-300 dark:hover:text-white'
               }`}
             >
@@ -489,7 +501,7 @@ export const KPICenter: React.FC = () => {
               onClick={() => setTimeframe('week')}
               className={`flex items-center gap-1.5 rounded-xl px-3.5 py-1.5 font-bold transition ${
                 timeframe === 'week'
-                  ? 'bg-amber-600 text-white shadow-sm'
+                  ? 'bg-blue-600 text-white shadow-sm'
                   : 'text-slate-600 hover:text-slate-900 dark:text-slate-300 dark:hover:text-white'
               }`}
             >
@@ -500,7 +512,7 @@ export const KPICenter: React.FC = () => {
               onClick={() => setTimeframe('month')}
               className={`flex items-center gap-1.5 rounded-xl px-3.5 py-1.5 font-bold transition ${
                 timeframe === 'month'
-                  ? 'bg-amber-600 text-white shadow-sm'
+                  ? 'bg-blue-600 text-white shadow-sm'
                   : 'text-slate-600 hover:text-slate-900 dark:text-slate-300 dark:hover:text-white'
               }`}
             >
@@ -512,13 +524,13 @@ export const KPICenter: React.FC = () => {
 
         <div className="text-xs font-medium text-slate-500 dark:text-slate-400">
           {timeframe === 'day' && (
-            <span>📅 Ngày đang xem: <strong className="text-slate-800 dark:text-white">{selectedDate}</strong></span>
+            <span>📅 Ngày đang xem: <strong className="text-slate-800 dark:text-blue-300 font-mono">{formatDateToVN(selectedDate)}</strong></span>
           )}
           {timeframe === 'week' && (
-            <span>🗓️ Tuần hiện tại: <strong className="text-slate-800 dark:text-white">{monStr}</strong> đến <strong className="text-slate-800 dark:text-white">{sunStr}</strong></span>
+            <span>🗓️ Tuần hiện tại: <strong className="text-slate-800 dark:text-white font-mono">{formatDateToVN(monStr)}</strong> đến <strong className="text-slate-800 dark:text-white font-mono">{formatDateToVN(sunStr)}</strong></span>
           )}
           {timeframe === 'month' && (
-            <span>📊 Tháng hiện tại: <strong className="text-slate-800 dark:text-white">{currentMonthPrefix}</strong></span>
+            <span>📊 Tháng hiện tại: <strong className="text-slate-800 dark:text-white font-mono">{currentMonthPrefix}</strong></span>
           )}
         </div>
       </div>
@@ -540,7 +552,7 @@ export const KPICenter: React.FC = () => {
                 }`}
               >
                 <UserCheck className="h-4 w-4" />
-                <span>Thẩm Định Theo Ngày ({selectedDate})</span>
+                <span>Thẩm Định Theo Ngày ({formatDateToVN(selectedDate)})</span>
                 <span className="rounded-full bg-blue-100 px-2 py-0.5 text-[10px] font-bold text-blue-700 dark:bg-blue-900/60 dark:text-blue-300">
                   {evaluatedCount} GV đã đánh giá
                 </span>
@@ -797,7 +809,7 @@ export const KPICenter: React.FC = () => {
                           <span>{ev.teacherName}</span>
                           <span className="font-mono text-slate-400">({ev.teacherCode})</span>
                           <span className="rounded-md bg-blue-100 px-2 py-0.5 text-[10px] font-bold text-blue-800 dark:bg-blue-950 dark:text-blue-300">
-                            Ngày {ev.date}
+                            Ngày {formatDateToVN(ev.date)}
                           </span>
                         </div>
                         <p className="text-slate-600 dark:text-slate-300 mt-1 italic">
@@ -824,17 +836,17 @@ export const KPICenter: React.FC = () => {
         /* ============================================================== */
         <div className="space-y-6">
           {/* Informative Banner */}
-          <div className="rounded-3xl border border-blue-200 bg-gradient-to-r from-blue-50 via-indigo-50 to-white p-5 dark:border-blue-950 dark:from-blue-950/30 dark:to-slate-900">
+          <div className="rounded-2xl border border-slate-200 bg-white p-4 sm:p-5 dark:border-slate-800 dark:bg-slate-900 shadow-xs">
             <div className="flex items-start gap-3">
-              <div className="rounded-2xl bg-blue-600 p-2 text-white shadow-md shadow-blue-500/30 shrink-0">
+              <div className="rounded-xl bg-blue-50 text-blue-600 p-2 dark:bg-blue-950 dark:text-blue-400 shrink-0">
                 <ShieldCheck className="h-5 w-5" />
               </div>
               <div>
-                <h3 className="text-sm font-extrabold text-slate-900 dark:text-white">
-                  Đánh Giá Hiệu Suất KPI & Xếp Hạng Học Sinh Nội Trú Toàn Trường
+                <h3 className="text-sm font-bold text-slate-900 dark:text-white">
+                  Đánh Giá Hiệu Suất KPI & Xếp Hạng Công Tác Nội Trú
                 </h3>
-                <p className="text-xs text-slate-600 dark:text-slate-300 mt-1 leading-relaxed">
-                  Toàn bộ điểm số của Thầy/Cô được Quản lý <strong>Thầy Lê Huy Phúc</strong> trực tiếp thẩm định từ Trung tâm Vận hành. Thầy/Cô có thể theo dõi xếp hạng theo <strong>Hằng ngày, Hằng tuần hoặc Hằng tháng</strong> minh bạch dưới đây.
+                <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5 leading-relaxed">
+                  Toàn bộ điểm số được Quản lý <strong>Thầy Lê Huy Phúc</strong> thẩm định và ký duyệt từ Trung tâm Vận hành. Thầy/Cô theo dõi tiến độ theo chu kỳ <strong>Hằng ngày, Hằng tuần hoặc Hằng tháng</strong> minh bạch dưới đây.
                 </p>
               </div>
             </div>
@@ -899,7 +911,7 @@ export const KPICenter: React.FC = () => {
               <div>
                 <div className="flex items-center gap-2">
                   <span className="rounded-md bg-blue-100 px-2 py-0.5 text-xs font-bold text-blue-700 dark:bg-blue-950 dark:text-blue-300">
-                    Ngày {selectedDate}
+                    Ngày {formatDateToVN(selectedDate)}
                   </span>
                   <h3 className="text-base font-extrabold text-slate-900 dark:text-white">
                     Phiếu Đánh Giá Công Việc Từ Quản Lý Thầy Lê Huy Phúc
@@ -1114,7 +1126,7 @@ export const KPICenter: React.FC = () => {
           isOpen={!!evaluatingTeacher}
           onClose={() => setEvaluatingTeacher(null)}
           title={`Thẩm Định Công Việc • ${evaluatingTeacher.fullName}`}
-          subtitle={`Mã: ${evaluatingTeacher.teacherCode} • Ngày đánh giá: ${selectedDate} • Người chấm: Thầy Lê Huy Phúc`}
+          subtitle={`Mã: ${evaluatingTeacher.teacherCode} • Ngày đánh giá: ${formatDateToVN(selectedDate)} • Người chấm: Thầy Lê Huy Phúc`}
         >
           <form onSubmit={handleSubmitEvaluation} className="space-y-5">
             {/* Quick 1-Click Presets */}

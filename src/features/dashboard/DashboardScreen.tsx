@@ -491,7 +491,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ setActiveModul
             <BarChart3 className="h-4 w-4" />
             <span>Executive Dashboard • Phân tích & Quản trị Sức khỏe Học sinh</span>
           </div>
-          <h2 className="text-xl font-extrabold text-slate-900 dark:text-white mt-1">
+          <h2 className="text-xl font-extrabold text-purple-600 dark:text-purple-400 mt-1">
             Dashboard Phân Tích & Theo Dõi Sức Khỏe Nội Trú
           </h2>
           <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">

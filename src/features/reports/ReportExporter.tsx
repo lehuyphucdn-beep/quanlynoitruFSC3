@@ -549,8 +549,8 @@ export const ReportExporter: React.FC = () => {
             <FileSpreadsheet className="h-4 w-4" />
             <span>Hệ Thống Báo Cáo Công Việc & Giám Sát Ký Túc Xá</span>
           </div>
-          <h2 className="text-xl font-extrabold text-slate-900 dark:text-white mt-1 flex items-center gap-2.5">
-            <span>Báo Cáo Công Việc Hằng Ngày & Cảnh Báo Live</span>
+          <h2 className="text-xl font-extrabold mt-1 flex items-center gap-2.5">
+            <span className="text-blue-600 dark:text-blue-400">Báo Cáo Công Việc Hằng Ngày & Cảnh Báo Live</span>
             {emergencyIncidentsCount > 0 && (
               <span className="flex items-center gap-1 rounded-full bg-rose-600 px-2.5 py-0.5 text-xs font-black text-white animate-pulse">
                 <ShieldAlert className="h-3.5 w-3.5" />

@@ -284,7 +284,7 @@ export const InteractionCenter: React.FC = () => {
             <MessageSquareHeart className="h-4 w-4" />
             <span>Student Care 1-1 • Hồ sơ Chăm sóc Học sinh</span>
           </div>
-          <h2 className="text-xl font-extrabold text-slate-900 dark:text-white mt-1">
+          <h2 className="text-xl font-extrabold text-purple-600 dark:text-purple-400 mt-1">
             {isManager
               ? 'Trung Tâm Giám Sát & Phân Tích Tương Tác 1-1 Toàn Trường'
               : 'Nhật Ký Tương Tác 1-1 & Chăm Sóc Học Sinh Của Thầy/Cô'}

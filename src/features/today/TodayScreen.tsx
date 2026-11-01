@@ -21,6 +21,7 @@ import {
 import { BOPSStore, subscribeToStore } from '../../services/storage';
 import { TaskInstance, TaskStatus, User } from '../../types';
 import { Modal } from '../../components/common/Modal';
+import { getWeekdayVN, formatDateVN } from '../../utils/dateUtils';
 
 interface TodayScreenProps {
   setActiveModule: (mod: string) => void;
@@ -48,12 +49,8 @@ export const TodayScreen: React.FC<TodayScreenProps> = ({ setActiveModule }) => 
     return unsubscribe;
   }, []);
 
-  const todayDateStr = new Date().toLocaleDateString('vi-VN', {
-    weekday: 'long',
-    year: 'numeric',
-    month: 'long',
-    day: 'numeric',
-  });
+  const now = new Date();
+  const todayDateStr = `${getWeekdayVN(now)}, ${formatDateVN(now)}`;
 
   const completedCount = tasks.filter((t) => t.status === 'completed' || t.status === 'verified').length;
   const pendingCount = tasks.filter((t) => t.status === 'pending' || t.status === 'working').length;
@@ -103,77 +100,78 @@ export const TodayScreen: React.FC<TodayScreenProps> = ({ setActiveModule }) => 
   return (
     <div className="space-y-6 pb-12">
       {/* 1. Daily Briefing Banner (Bản tin đầu ngày) */}
-      <div className="relative overflow-hidden rounded-3xl bg-gradient-to-r from-blue-600 via-indigo-600 to-slate-900 p-6 text-white shadow-xl">
-        <div className="relative z-10 flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+      <div className="rounded-2xl border border-slate-800 bg-slate-900 p-5 text-white shadow-xs">
+        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
           <div className="space-y-1">
-            <div className="inline-flex items-center gap-1.5 rounded-full bg-white/20 px-3 py-1 text-xs font-medium backdrop-blur-md">
-              <Sparkles className="h-3.5 w-3.5 text-amber-300" />
-              <span>Bản tin Vận hành Đầu ngày</span>
+            <div className="inline-flex items-center gap-1.5 text-xs text-blue-400 font-medium">
+              <span>Bản tin vận hành ca trực</span>
+              <span aria-hidden="true">·</span>
+              <span className="text-slate-400">{todayDateStr}</span>
             </div>
-            <h2 className="text-2xl font-black tracking-tight">
+            <h2 className="text-xl sm:text-2xl font-bold tracking-tight text-white">
               Xin chào, {currentUser.fullName}!
             </h2>
-            <p className="text-xs text-blue-100 max-w-xl">
-              Hôm nay bạn có <strong className="text-amber-300">{tasks.length} nhiệm vụ</strong> được phân công theo lịch trực. Hãy thực hiện đúng mốc thời gian để duy trì điểm Reliability.
+            <p className="text-xs text-slate-300 max-w-xl leading-relaxed">
+              Hôm nay có <strong className="text-white font-semibold">{tasks.length} nhiệm vụ</strong> được phân công theo lịch trực. Hãy hoàn thành đúng mốc thời gian để duy trì điểm KPI.
             </p>
           </div>
 
-          <div className="flex items-center gap-3 bg-white/10 p-3 rounded-2xl backdrop-blur-md border border-white/10">
-            <div className="text-center">
-              <div className="text-xs font-semibold text-blue-200">KPI Tạm tính</div>
-              <div className="text-2xl font-black text-amber-300">{currentKPI.totalScore}</div>
-              <div className="text-[10px] font-bold uppercase tracking-wider text-white">
+          <div className="flex items-center gap-4 rounded-xl border border-slate-800 bg-slate-950/60 p-3 self-start md:self-auto">
+            <div className="text-center px-2">
+              <div className="text-[11px] text-slate-400">KPI Tạm tính</div>
+              <div className="text-2xl font-bold text-white tabular-nums">{currentKPI.totalScore}</div>
+              <div className="text-[10px] font-medium text-blue-400">
                 Hạng {currentKPI.rank}
               </div>
             </div>
-            <div className="h-8 w-px bg-white/20" />
-            <div className="text-center">
-              <div className="text-xs font-semibold text-blue-200">Workload Index</div>
-              <div className="text-xl font-bold text-white">{currentUser.workloadIndex}</div>
-              <div className="text-[10px] text-blue-200">Phòng & HS</div>
+            <div className="h-8 w-px bg-slate-800" />
+            <div className="text-center px-2">
+              <div className="text-[11px] text-slate-400">Workload Index</div>
+              <div className="text-2xl font-bold text-white tabular-nums">{currentUser.workloadIndex}</div>
+              <div className="text-[10px] text-slate-400">Định mức</div>
             </div>
           </div>
         </div>
       </div>
 
       {/* 2. Quick Progress Summary */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 sm:gap-4">
+        <div className="rounded-xl border border-slate-200 bg-white p-3.5 sm:p-4 shadow-xs dark:border-slate-800 dark:bg-slate-900">
           <div className="flex items-center justify-between text-slate-500">
-            <span className="text-xs font-semibold">Tổng Task hôm nay</span>
-            <CheckSquare className="h-4 w-4 text-blue-500" />
+            <span className="text-xs font-medium">Tổng task hôm nay</span>
+            <CheckSquare className="h-4 w-4 text-blue-600" />
           </div>
-          <div className="mt-2 text-2xl font-black text-slate-900 dark:text-white">{tasks.length}</div>
-          <div className="text-[11px] text-slate-400">Sinh tự động từ Lịch trực</div>
+          <div className="mt-2 text-2xl font-bold text-slate-900 dark:text-white tabular-nums">{tasks.length}</div>
+          <div className="text-[11px] text-slate-400 mt-0.5">Sinh từ lịch trực</div>
         </div>
 
-        <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+        <div className="rounded-xl border border-slate-200 bg-white p-3.5 sm:p-4 shadow-xs dark:border-slate-800 dark:bg-slate-900">
           <div className="flex items-center justify-between text-slate-500">
-            <span className="text-xs font-semibold">Đã hoàn thành</span>
-            <CheckCircle2 className="h-4 w-4 text-emerald-500" />
+            <span className="text-xs font-medium">Đã hoàn thành</span>
+            <CheckCircle2 className="h-4 w-4 text-emerald-600" />
           </div>
-          <div className="mt-2 text-2xl font-black text-emerald-600">{completedCount}</div>
-          <div className="text-[11px] text-slate-400">Task đạt yêu cầu</div>
+          <div className="mt-2 text-2xl font-bold text-emerald-600 tabular-nums">{completedCount}</div>
+          <div className="text-[11px] text-slate-400 mt-0.5">Đạt yêu cầu</div>
         </div>
 
-        <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+        <div className="rounded-xl border border-slate-200 bg-white p-3.5 sm:p-4 shadow-xs dark:border-slate-800 dark:bg-slate-900">
           <div className="flex items-center justify-between text-slate-500">
-            <span className="text-xs font-semibold">Đang chờ / Đang làm</span>
-            <Clock className="h-4 w-4 text-amber-500" />
+            <span className="text-xs font-medium">Đang chờ / Làm</span>
+            <Clock className="h-4 w-4 text-blue-600" />
           </div>
-          <div className="mt-2 text-2xl font-black text-amber-600">{pendingCount}</div>
-          <div className="text-[11px] text-slate-400">Cần thực hiện trong ca</div>
+          <div className="mt-2 text-2xl font-bold text-slate-800 dark:text-slate-200 tabular-nums">{pendingCount}</div>
+          <div className="text-[11px] text-slate-400 mt-0.5">Trong ca trực</div>
         </div>
 
-        <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+        <div className="rounded-xl border border-slate-200 bg-white p-3.5 sm:p-4 shadow-xs dark:border-slate-800 dark:bg-slate-900">
           <div className="flex items-center justify-between text-slate-500">
-            <span className="text-xs font-semibold">Tương tác 1-1 Tuần</span>
-            <MessageSquareHeart className="h-4 w-4 text-purple-500" />
+            <span className="text-xs font-medium">Tương tác 1-1 tuần</span>
+            <MessageSquareHeart className="h-4 w-4 text-blue-600" />
           </div>
-          <div className="mt-2 text-2xl font-black text-purple-600">
+          <div className="mt-2 text-2xl font-bold text-slate-900 dark:text-white tabular-nums">
             {currentKPI.interactionsCompletedThisWeek} <span className="text-xs font-normal text-slate-400">/ 1 HS</span>
           </div>
-          <div className="text-[11px] text-slate-400">Tối thiểu nhập 1 HS/tuần (Không nhập: 0đ)</div>
+          <div className="text-[11px] text-slate-400 mt-0.5">Chỉ tiêu chăm sóc tuần</div>
         </div>
       </div>
 

@@ -11,6 +11,8 @@ import { BOPSStore, subscribeToStore } from '../../services/storage';
 import { User } from '../../types';
 import { LoginModal } from '../auth/LoginModal';
 import { ChangePasswordModal } from '../auth/ChangePasswordModal';
+import { PWAInstallButton } from '../common/PWAInstallButton';
+import { formatDateVN, formatTime24, getWeekdayVN } from '../../utils/dateUtils';
 
 interface HeaderProps {
   darkMode: boolean;
@@ -50,8 +52,14 @@ export const Header: React.FC<HeaderProps> = ({
       setIsChangePasswordOpen(true);
     }
 
+    const handleOpenLogin = () => setIsLoginModalOpen(true);
+    window.addEventListener('bops:open-login-modal', handleOpenLogin);
+
     const unsubscribe = subscribeToStore(handleUpdate);
-    return unsubscribe;
+    return () => {
+      window.removeEventListener('bops:open-login-modal', handleOpenLogin);
+      unsubscribe();
+    };
   }, []);
 
   const unreadCount = currentUser
@@ -60,27 +68,26 @@ export const Header: React.FC<HeaderProps> = ({
       ).length
     : 0;
 
-  const currentDisplayTime = new Date().toLocaleTimeString('vi-VN', {
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-  });
+  const [currentTime, setCurrentTime] = useState(new Date());
 
-  const currentDateFormatted = new Date().toLocaleDateString('vi-VN', {
-    weekday: 'long',
-    day: '2-digit',
-    month: '2-digit',
-    year: 'numeric',
-  });
+  useEffect(() => {
+    const timer = setInterval(() => setCurrentTime(new Date()), 1000);
+    return () => clearInterval(timer);
+  }, []);
+
+  const weekday = getWeekdayVN(currentTime);
+  const dateFormatted = formatDateVN(currentTime);
+  const time24 = formatTime24(currentTime, true);
 
   return (
-    <header className="sticky top-0 z-30 flex h-16 w-full items-center justify-between border-b border-slate-200 bg-white/90 px-4 backdrop-blur-md dark:border-slate-800 dark:bg-slate-900/90 sm:px-6">
+    <header className="sticky top-0 z-30 flex h-16 w-full items-center justify-between border-b border-slate-200 bg-white px-4 dark:border-slate-800 dark:bg-slate-900 sm:px-6">
       {/* Left: Mobile menu button & Current Section Title */}
       <div className="flex items-center gap-3">
         <button
-          onClick={toggleSidebar}
-          className="rounded-lg p-2 text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800 md:hidden"
-          title="Mở menu"
+          onClick={onOpenMobileSidebar || toggleSidebar}
+          className="rounded-lg p-2 text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800 lg:hidden cursor-pointer"
+          title="Mở menu điều hướng"
+          aria-label="Mở menu"
         >
           <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
@@ -88,11 +95,11 @@ export const Header: React.FC<HeaderProps> = ({
         </button>
 
         <div className="hidden sm:flex flex-col">
-          <span className="text-xs font-semibold uppercase tracking-wider text-blue-600 dark:text-blue-400">
-            Hệ thống Quản trị Nội trú
+          <span className="text-[11px] font-bold uppercase tracking-wider text-blue-600 dark:text-blue-400">
+            Hệ thống Quản trị Nội trú BOPS FSC3
           </span>
-          <span className="text-sm font-bold text-slate-800 dark:text-slate-100">
-            {currentDateFormatted} • {currentDisplayTime}
+          <span className="text-xs font-semibold text-slate-700 dark:text-slate-200">
+            {weekday}, {dateFormatted} <span className="text-slate-400 dark:text-slate-500">·</span> <span className="font-mono font-bold text-slate-900 dark:text-white">{time24}</span>
           </span>
         </div>
       </div>
@@ -147,6 +154,9 @@ export const Header: React.FC<HeaderProps> = ({
             <span>Đăng nhập</span>
           </button>
         )}
+
+        {/* PWA In-App Install Prompt */}
+        <PWAInstallButton />
 
         {/* Notifications */}
         <div className="relative">

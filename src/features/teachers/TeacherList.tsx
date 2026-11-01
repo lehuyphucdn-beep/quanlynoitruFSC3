@@ -39,15 +39,20 @@ export const TeacherList: React.FC = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedTeacher, setSelectedTeacher] = useState<User | null>(null);
   const [activeTab, setActiveTab] = useState<'overview' | 'account' | 'tasks' | 'interactions' | 'kpi'>('overview');
+  const [syncError, setSyncError] = useState<string | null>(BOPSStore.getSyncError());
   
   // Account Handover Modal state
   const [handoverTeacher, setHandoverTeacher] = useState<User | null>(null);
   const [copySuccess, setCopySuccess] = useState(false);
-  const [resetPasswordInput, setResetPasswordInput] = useState('123456');
-  const [passwordMsg, setPasswordMsg] = useState<string | null>(null);
+  const [authProvisionLoading, setAuthProvisionLoading] = useState(false);
+  const [authProvisionMsg, setAuthProvisionMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [authProvisionPassword, setAuthProvisionPassword] = useState('Fpt123456@');
+  const [manualAuthUid, setManualAuthUid] = useState('');
+  const [showManualUidInput, setShowManualUidInput] = useState(false);
 
   // Add Teacher Modal state
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
+  const [isAddingTeacher, setIsAddingTeacher] = useState(false);
   const [newTeacherData, setNewTeacherData] = useState({
     fullName: '',
     teacherCode: '',
@@ -56,6 +61,7 @@ export const TeacherList: React.FC = () => {
     position: 'Giáo viên Quản nhiệm DomB',
     building: 'DomB',
     assignedFloors: ['Tầng 2'],
+    initialPassword: 'Fpt123456@',
   });
 
   // Delete Teacher confirmation modal state
@@ -131,6 +137,7 @@ export const TeacherList: React.FC = () => {
       const allUsers = BOPSStore.getUsers();
       setTeachers(allUsers.filter((u) => u.role === 'teacher'));
       setKPIs(BOPSStore.getKPIs());
+      setSyncError(BOPSStore.getSyncError());
     };
 
     loadData();
@@ -178,40 +185,154 @@ export const TeacherList: React.FC = () => {
     }
   };
 
-  const handleAddTeacherSubmit = (e: React.FormEvent) => {
+  const handleAddTeacherSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newTeacherData.fullName || !newTeacherData.teacherCode) return;
+    if (!newTeacherData.fullName.trim() || !newTeacherData.teacherCode.trim()) {
+      alert('Vui lòng nhập đầy đủ Mã GVQN và Họ và Tên!');
+      return;
+    }
 
-    BOPSStore.addUser({
-      fullName: newTeacherData.fullName,
-      teacherCode: newTeacherData.teacherCode,
-      email: newTeacherData.email || `${newTeacherData.teacherCode.toLowerCase()}@school.edu.vn`,
-      phone: newTeacherData.phone || '0988 123 456',
-      role: 'teacher',
-      position: newTeacherData.position,
-      status: 'active',
-      departmentId: 'dept-01',
-      employmentDate: '2023-09-01',
-      birthday: '1992-04-12',
-      gender: 'nam',
-      address: 'Hà Nội',
-      nightShiftEligible: true,
-      assignedRoomIds: ['rm-101'],
-      assignedStudentIds: [],
-      workloadIndex: 1.0,
-      avatar: `https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150`,
-    });
+    setIsAddingTeacher(true);
+    try {
+      const teacherCode = newTeacherData.teacherCode.trim().toUpperCase();
+      const fullName = newTeacherData.fullName.trim();
+      const email = (newTeacherData.email.trim() || `${teacherCode.toLowerCase()}@fpt.edu.vn`).toLowerCase();
 
-    setIsAddModalOpen(false);
-    setNewTeacherData({
-      fullName: '',
-      teacherCode: '',
-      email: '',
-      phone: '',
-      position: 'Giáo viên Quản nhiệm',
-      building: 'Tòa A - Nam',
-      assignedFloors: ['Tầng 2'],
-    });
+      const addRes = await BOPSStore.addUser({
+        fullName,
+        teacherCode,
+        email,
+        phone: newTeacherData.phone.trim() || '0988 123 456',
+        role: 'teacher',
+        position: newTeacherData.position.trim() || 'Giáo viên Quản nhiệm',
+        status: 'active',
+        departmentId: 'dept-01',
+        employmentDate: '2023-09-01',
+        birthday: '1992-04-12',
+        gender: 'nam',
+        address: 'Hà Nội',
+        nightShiftEligible: true,
+        assignedRoomIds: [],
+        assignedStudentIds: [],
+        assignedBuilding: newTeacherData.building || 'DomB',
+        workloadIndex: 1.0,
+        avatar: `https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150`,
+      });
+
+      if (!addRes.success || !addRes.user) {
+        alert(addRes.error || 'Lỗi khi lưu hồ sơ giáo viên vào cơ sở dữ liệu.');
+        return;
+      }
+
+      const created = addRes.user;
+
+      if (newTeacherData.initialPassword && newTeacherData.initialPassword.trim().length >= 6) {
+        const authRes = await BOPSStore.provisionTeacherAuth(
+          created.id,
+          email,
+          newTeacherData.initialPassword.trim()
+        );
+        if (!authRes.success) {
+          alert(`Đã lưu hồ sơ giáo viên nhưng chưa kích hoạt tài khoản Auth: ${authRes.error}\nQuản lý có thể cấp lại tài khoản sau trong mục Bàn giao tài khoản.`);
+        }
+      }
+
+      setIsAddModalOpen(false);
+      setNewTeacherData({
+        fullName: '',
+        teacherCode: '',
+        email: '',
+        phone: '',
+        position: 'Giáo viên Quản nhiệm DomB',
+        building: 'DomB',
+        assignedFloors: ['Tầng 2'],
+        initialPassword: 'Fpt123456@',
+      });
+    } catch (err: any) {
+      alert(`Lỗi khi tạo giáo viên: ${err?.message || err}`);
+    } finally {
+      setIsAddingTeacher(false);
+    }
+  };
+
+  const handleProvisionAuth = async (targetTeacher: User) => {
+    if (!authProvisionPassword || authProvisionPassword.length < 6) {
+      setAuthProvisionMsg({ type: 'error', text: 'Mật khẩu phải có ít nhất 6 ký tự.' });
+      return;
+    }
+    setAuthProvisionLoading(true);
+    setAuthProvisionMsg(null);
+    try {
+      const res = await BOPSStore.provisionTeacherAuth(
+        targetTeacher.id,
+        targetTeacher.email,
+        authProvisionPassword
+      );
+      if (res.success) {
+        setAuthProvisionMsg({
+          type: 'success',
+          text: `Đã cấp tài khoản Supabase Auth thành công! UID: ${res.authUserId || ''}${res.warning ? ` (${res.warning})` : ''}`,
+        });
+        const updated = BOPSStore.getUsers().find((u) => u.id === targetTeacher.id) || null;
+        if (selectedTeacher && selectedTeacher.id === targetTeacher.id) {
+          setSelectedTeacher(updated);
+        }
+        if (handoverTeacher && handoverTeacher.id === targetTeacher.id) {
+          setHandoverTeacher(updated);
+        }
+      } else {
+        setAuthProvisionMsg({
+          type: 'error',
+          text: res.error || 'Lỗi không xác định khi tạo tài khoản Auth.',
+        });
+      }
+    } catch (err: any) {
+      setAuthProvisionMsg({
+        type: 'error',
+        text: err?.message || 'Lỗi khi khởi tạo tài khoản Auth.',
+      });
+    } finally {
+      setAuthProvisionLoading(false);
+    }
+  };
+
+  const handleLinkManualAuthUid = async (targetTeacher: User) => {
+    if (!manualAuthUid || manualAuthUid.trim().length < 10) {
+      setAuthProvisionMsg({ type: 'error', text: 'Vui lòng nhập đúng Auth UID (UUID hợp lệ).' });
+      return;
+    }
+    setAuthProvisionLoading(true);
+    setAuthProvisionMsg(null);
+    try {
+      const res = await BOPSStore.linkTeacherAuthId(targetTeacher.id, manualAuthUid.trim());
+      if (res.success) {
+        setAuthProvisionMsg({
+          type: 'success',
+          text: 'Đã liên kết Auth UID thành công vào hồ sơ giáo viên.',
+        });
+        const updated = BOPSStore.getUsers().find((u) => u.id === targetTeacher.id) || null;
+        if (selectedTeacher && selectedTeacher.id === targetTeacher.id) {
+          setSelectedTeacher(updated);
+        }
+        if (handoverTeacher && handoverTeacher.id === targetTeacher.id) {
+          setHandoverTeacher(updated);
+        }
+        setManualAuthUid('');
+        setShowManualUidInput(false);
+      } else {
+        setAuthProvisionMsg({
+          type: 'error',
+          text: res.error || 'Lỗi khi liên kết Auth UID.',
+        });
+      }
+    } catch (err: any) {
+      setAuthProvisionMsg({
+        type: 'error',
+        text: err?.message || 'Lỗi khi liên kết Auth UID.',
+      });
+    } finally {
+      setAuthProvisionLoading(false);
+    }
   };
 
   const handleCopyCredentials = (teacher: User) => {
@@ -220,27 +341,11 @@ Giáo viên: ${teacher.fullName}
 Mã GVQN: ${teacher.teacherCode}
 Tài khoản đăng nhập (Tên viết tắt): ${teacher.username || teacher.teacherCode}
 Email: ${teacher.email}
-Xác thực: Tài khoản bảo mật qua hệ thống Supabase Auth
+Xác thực: Tài khoản bảo mật qua hệ thống Supabase Auth ${teacher.authUserId ? `(UID: ${teacher.authUserId})` : '(Chưa liên kết UID)'}
 Đường dẫn: Hệ thống Quản trị Nội trú BOPS`;
     navigator.clipboard.writeText(text);
     setCopySuccess(true);
     setTimeout(() => setCopySuccess(false), 2500);
-  };
-
-  const handleResetPassword = (_teacher: User, _customPass?: string) => {
-    // Tạm vô hiệu hóa theo yêu cầu C2: Không reset mật khẩu bằng cách ghi chuỗi 123456 vào bảng users
-    setPasswordMsg(
-      'Tính năng quản lý đặt lại mật khẩu cho giáo viên tạm thời bị khóa vì lý do an toàn. Hệ thống chưa có API quản trị máy chủ (admin server-side auth). Giáo viên cần tự đăng nhập và dùng chức năng Đổi mật khẩu cá nhân.'
-    );
-    setTimeout(() => setPasswordMsg(null), 6000);
-  };
-
-  const handleQuickSwitchUser = (_teacher: User) => {
-    alert(
-      'Chuyển đổi nhanh tài khoản không được hỗ trợ trong cơ chế Supabase Auth. Vui lòng đăng xuất và đăng nhập bằng thông tin xác thực chính thức.'
-    );
-    setHandoverTeacher(null);
-    setSelectedTeacher(null);
   };
 
   const filteredTeachers = teachers.filter(
@@ -294,6 +399,16 @@ Xác thực: Tài khoản bảo mật qua hệ thống Supabase Auth
         </div>
       </div>
 
+      {/* Cảnh báo lỗi đồng bộ từ Supabase nếu có */}
+      {syncError && (
+        <div className="flex items-center gap-2 rounded-xl bg-amber-500/10 border border-amber-500/20 px-4 py-3 text-xs text-amber-700 dark:text-amber-400">
+          <AlertTriangle className="h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" />
+          <span>
+            <strong>Cảnh báo đồng bộ Supabase:</strong> {syncError}. Danh sách giáo viên có thể chưa được cập nhật mới nhất từ máy chủ.
+          </span>
+        </div>
+      )}
+
       {/* Teachers Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
         {filteredTeachers.map((teacher) => {
@@ -323,13 +438,31 @@ Xác thực: Tài khoản bảo mật qua hệ thống Supabase Auth
                       <span className="rounded bg-blue-100 px-2 py-0.5 text-[10px] font-mono font-bold text-blue-700 dark:bg-blue-950 dark:text-blue-300">
                         {teacher.teacherCode}
                       </span>
+                      {teacher.authUserId ? (
+                        <span
+                          className="rounded bg-emerald-100 px-1.5 py-0.5 text-[9px] font-bold text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300 flex items-center gap-0.5"
+                          title={`Đã liên kết Supabase Auth (UID: ${teacher.authUserId})`}
+                        >
+                          <ShieldCheck className="h-3 w-3 text-emerald-600" />
+                          Đã có Auth
+                        </span>
+                      ) : (
+                        <span
+                          className="rounded bg-amber-100 px-1.5 py-0.5 text-[9px] font-bold text-amber-700 dark:bg-amber-950 dark:text-amber-300 flex items-center gap-0.5"
+                          title="Chưa kích hoạt tài khoản Supabase Auth"
+                        >
+                          <AlertTriangle className="h-3 w-3 text-amber-600" />
+                          Chưa Auth
+                        </span>
+                      )}
                       <button
                         onClick={(e) => {
                           e.stopPropagation();
                           setHandoverTeacher(teacher);
+                          setAuthProvisionMsg(null);
                         }}
                         className="p-1 text-slate-400 hover:text-amber-600 dark:hover:text-amber-400 transition"
-                        title="Bàn giao tài khoản đăng nhập"
+                        title="Bàn giao & Cấp tài khoản đăng nhập"
                       >
                         <KeyRound className="h-3.5 w-3.5" />
                       </button>
@@ -460,47 +593,109 @@ Xác thực: Tài khoản bảo mật qua hệ thống Supabase Auth
                   </div>
                 </div>
 
-                {/* Change Password Card - Admin Reset Disabled in C2 */}
+                {/* Supabase Auth Management Card */}
                 <div className="rounded-2xl border border-slate-200 bg-slate-50/60 p-4 dark:border-slate-800 dark:bg-slate-900/60 space-y-3">
                   <div className="flex items-center justify-between">
                     <h4 className="font-bold text-slate-900 dark:text-white flex items-center gap-2 text-xs">
-                      <KeyRound className="h-4 w-4 text-slate-500" />
-                      Đặt Lại Mật Khẩu Cho Giáo Viên
+                      <KeyRound className="h-4 w-4 text-blue-600" />
+                      Quản Lý & Cấp Tài Khoản Supabase Auth
                     </h4>
-                    <span className="rounded-full bg-amber-100 px-2.5 py-0.5 text-[10px] font-bold text-amber-800 dark:bg-amber-950 dark:text-amber-300">
-                      Tạm khóa an toàn
-                    </span>
+                    {selectedTeacher.authUserId ? (
+                      <span className="rounded-full bg-emerald-100 px-2.5 py-0.5 text-[10px] font-bold text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300 flex items-center gap-1">
+                        <ShieldCheck className="h-3 w-3" /> Đã cấp Auth (UID: {selectedTeacher.authUserId.slice(0, 8)}...)
+                      </span>
+                    ) : (
+                      <span className="rounded-full bg-amber-100 px-2.5 py-0.5 text-[10px] font-bold text-amber-800 dark:bg-amber-950 dark:text-amber-300 flex items-center gap-1">
+                        <AlertTriangle className="h-3 w-3" /> Chưa cấp Auth
+                      </span>
+                    )}
                   </div>
 
-                  <div className="rounded-xl border border-amber-200/80 bg-amber-50/80 p-3 text-[11px] text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/40 dark:text-amber-200 flex items-start gap-2">
-                    <AlertTriangle className="h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400 mt-0.5" />
-                    <div className="leading-relaxed">
-                      Chức năng quản lý đặt lại mật khẩu của người khác tạm thời được vô hiệu hóa để bảo đảm an toàn dữ liệu, tránh ghi chuỗi mật khẩu thô vào hệ thống. Giáo viên vui lòng tự đăng nhập và đổi mật khẩu qua mục <strong>Đổi mật khẩu cá nhân</strong>.
-                    </div>
-                  </div>
-
-                  {passwordMsg && (
-                    <div className="p-2.5 rounded-xl bg-amber-100 text-amber-900 font-bold text-[11px] dark:bg-amber-950 dark:text-amber-300">
-                      {passwordMsg}
+                  {authProvisionMsg && (
+                    <div
+                      className={`p-3 rounded-xl text-xs font-semibold flex items-center gap-2 ${
+                        authProvisionMsg.type === 'success'
+                          ? 'bg-emerald-50 text-emerald-800 border border-emerald-200 dark:bg-emerald-950/50 dark:text-emerald-200'
+                          : 'bg-rose-50 text-rose-800 border border-rose-200 dark:bg-rose-950/50 dark:text-rose-200'
+                      }`}
+                    >
+                      {authProvisionMsg.type === 'success' ? (
+                        <Check className="h-4 w-4 shrink-0 text-emerald-600" />
+                      ) : (
+                        <AlertTriangle className="h-4 w-4 shrink-0 text-rose-600" />
+                      )}
+                      <span>{authProvisionMsg.text}</span>
                     </div>
                   )}
 
-                  <div className="flex items-center gap-2 opacity-60">
-                    <input
-                      type="text"
-                      disabled
-                      value="●●●●●●●●"
-                      placeholder="Mật khẩu được quản lý bởi Supabase Auth..."
-                      className="flex-1 rounded-xl border border-slate-200 bg-slate-100 px-3 py-2 font-mono font-bold text-slate-500 cursor-not-allowed dark:border-slate-700 dark:bg-slate-800 dark:text-slate-400 text-xs shadow-sm"
-                    />
-                    <button
-                      type="button"
-                      disabled
-                      onClick={() => handleResetPassword(selectedTeacher)}
-                      className="rounded-xl bg-slate-300 px-4 py-2 font-bold text-slate-500 cursor-not-allowed text-xs shrink-0 dark:bg-slate-700 dark:text-slate-400"
-                    >
-                      Khóa An Toàn
-                    </button>
+                  <div className="space-y-2">
+                    <label className="block text-[11px] font-semibold text-slate-700 dark:text-slate-300">
+                      Mật khẩu khởi tạo đăng nhập:
+                    </label>
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="text"
+                        value={authProvisionPassword}
+                        onChange={(e) => setAuthProvisionPassword(e.target.value)}
+                        placeholder="Nhập mật khẩu (tối thiểu 6 ký tự)..."
+                        className="flex-1 rounded-xl border border-slate-200 bg-white px-3 py-2 font-mono font-bold text-slate-800 focus:border-blue-500 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 text-xs shadow-sm"
+                      />
+                      <button
+                        type="button"
+                        disabled={authProvisionLoading}
+                        onClick={() => handleProvisionAuth(selectedTeacher)}
+                        className="rounded-xl bg-blue-600 hover:bg-blue-700 px-4 py-2 font-bold text-white text-xs shrink-0 shadow-sm transition disabled:opacity-50 flex items-center gap-1.5"
+                      >
+                        <ShieldCheck className="h-4 w-4" />
+                        <span>{authProvisionLoading ? 'Đang cấp...' : selectedTeacher.authUserId ? 'Cấp Lại / Đổi Auth' : 'Khởi Tạo Tài Khoản Auth'}</span>
+                      </button>
+                    </div>
+                    <span className="text-[10px] text-slate-400 block">
+                      Tài khoản sẽ được đăng ký trực tiếp trên Supabase Auth và tự động gán <code className="font-mono text-blue-600">auth_user_id</code> vào hồ sơ giáo viên.
+                    </span>
+                  </div>
+
+                  {/* Manual UID Link Toggle */}
+                  <div className="pt-2 border-t border-slate-200/60 dark:border-slate-800">
+                    {!showManualUidInput ? (
+                      <button
+                        type="button"
+                        onClick={() => setShowManualUidInput(true)}
+                        className="text-[11px] text-blue-600 hover:underline dark:text-blue-400 font-medium"
+                      >
+                        + Hoặc liên kết thủ công với UID đã tạo sẵn trên Supabase
+                      </button>
+                    ) : (
+                      <div className="space-y-2">
+                        <label className="block text-[11px] font-semibold text-slate-700 dark:text-slate-300">
+                          Nhập Auth UID (UUID từ Supabase Authentication):
+                        </label>
+                        <div className="flex items-center gap-2">
+                          <input
+                            type="text"
+                            value={manualAuthUid}
+                            onChange={(e) => setManualAuthUid(e.target.value)}
+                            placeholder="VD: 550e8400-e29b-41d4-a716-446655440000"
+                            className="flex-1 rounded-xl border border-slate-200 bg-white px-3 py-2 font-mono text-xs text-slate-800 focus:border-blue-500 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 shadow-sm"
+                          />
+                          <button
+                            type="button"
+                            disabled={authProvisionLoading}
+                            onClick={() => handleLinkManualAuthUid(selectedTeacher)}
+                            className="rounded-xl bg-slate-800 hover:bg-slate-900 text-white dark:bg-slate-700 dark:hover:bg-slate-600 px-3.5 py-2 font-bold text-xs shrink-0 transition disabled:opacity-50"
+                          >
+                            Lưu UID
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setShowManualUidInput(false)}
+                            className="rounded-xl border border-slate-200 px-2.5 py-2 text-xs font-semibold text-slate-500 hover:bg-slate-100 dark:border-slate-700"
+                          >
+                            Đóng
+                          </button>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 </div>
 
@@ -842,9 +1037,26 @@ Xác thực: Tài khoản bảo mật qua hệ thống Supabase Auth
             </div>
           </div>
 
+          <div>
+            <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
+              Mật khẩu khởi tạo đăng nhập (Supabase Auth)
+            </label>
+            <input
+              type="text"
+              placeholder="VD: Fpt123456@"
+              value={newTeacherData.initialPassword}
+              onChange={(e) => setNewTeacherData({ ...newTeacherData, initialPassword: e.target.value })}
+              className="w-full rounded-xl border border-slate-200 bg-white p-2 text-xs font-mono font-bold focus:border-blue-500 focus:outline-none dark:border-slate-700 dark:bg-slate-900 dark:text-white"
+            />
+            <span className="text-[10px] text-slate-400 mt-1 block">
+              Tối thiểu 6 ký tự. Hệ thống sẽ tự động tạo tài khoản Supabase Auth và liên kết <code className="font-mono text-blue-600">auth_user_id</code> vào hồ sơ giáo viên.
+            </span>
+          </div>
+
           <div className="pt-3 border-t border-slate-200 dark:border-slate-800 flex justify-end gap-2">
             <button
               type="button"
+              disabled={isAddingTeacher}
               onClick={() => setIsAddModalOpen(false)}
               className="rounded-xl border border-slate-200 px-4 py-2 text-xs font-bold text-slate-600 hover:bg-slate-100 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
             >
@@ -852,9 +1064,10 @@ Xác thực: Tài khoản bảo mật qua hệ thống Supabase Auth
             </button>
             <button
               type="submit"
-              className="rounded-xl bg-blue-600 px-4 py-2 text-xs font-bold text-white shadow-sm hover:bg-blue-700"
+              disabled={isAddingTeacher}
+              className="rounded-xl bg-blue-600 px-4 py-2 text-xs font-bold text-white shadow-sm hover:bg-blue-700 disabled:opacity-50"
             >
-              Lưu & Tạo Tài Khoản
+              {isAddingTeacher ? 'Đang tạo & Cấp Auth...' : 'Lưu & Tạo Tài Khoản'}
             </button>
           </div>
         </form>
@@ -1028,6 +1241,109 @@ Xác thực: Tài khoản bảo mật qua hệ thống Supabase Auth
               </div>
             </div>
 
+            {/* Supabase Auth Management inside Handover Modal */}
+            <div className="rounded-2xl border border-slate-200 bg-slate-50/70 p-3.5 dark:border-slate-800 dark:bg-slate-900/60 space-y-2.5">
+              <div className="flex items-center justify-between">
+                <span className="font-bold text-slate-800 dark:text-slate-200 flex items-center gap-1.5 text-xs">
+                  <KeyRound className="h-3.5 w-3.5 text-blue-600" />
+                  Trạng Thái & Cấp Quyền Đăng Nhập Supabase
+                </span>
+                {handoverTeacher.authUserId ? (
+                  <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-bold text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300 flex items-center gap-1">
+                    <ShieldCheck className="h-3 w-3" /> Đã cấp Auth
+                  </span>
+                ) : (
+                  <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold text-amber-800 dark:bg-amber-950 dark:text-amber-300 flex items-center gap-1">
+                    <AlertTriangle className="h-3 w-3" /> Chưa cấp Auth
+                  </span>
+                )}
+              </div>
+
+              {authProvisionMsg && (
+                <div
+                  className={`p-2.5 rounded-xl text-xs font-semibold flex items-center gap-2 ${
+                    authProvisionMsg.type === 'success'
+                      ? 'bg-emerald-50 text-emerald-800 border border-emerald-200 dark:bg-emerald-950/50 dark:text-emerald-200'
+                      : 'bg-rose-50 text-rose-800 border border-rose-200 dark:bg-rose-950/50 dark:text-rose-200'
+                  }`}
+                >
+                  {authProvisionMsg.type === 'success' ? (
+                    <Check className="h-3.5 w-3.5 shrink-0 text-emerald-600" />
+                  ) : (
+                    <AlertTriangle className="h-3.5 w-3.5 shrink-0 text-rose-600" />
+                  )}
+                  <span>{authProvisionMsg.text}</span>
+                </div>
+              )}
+
+              <div className="space-y-1.5">
+                <label className="block text-[11px] font-semibold text-slate-700 dark:text-slate-300">
+                  Mật khẩu khởi tạo đăng nhập:
+                </label>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="text"
+                    value={authProvisionPassword}
+                    onChange={(e) => setAuthProvisionPassword(e.target.value)}
+                    placeholder="Mật khẩu ít nhất 6 ký tự..."
+                    className="flex-1 rounded-xl border border-slate-200 bg-white px-3 py-1.5 font-mono font-bold text-slate-800 focus:border-blue-500 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 text-xs shadow-sm"
+                  />
+                  <button
+                    type="button"
+                    disabled={authProvisionLoading}
+                    onClick={() => handleProvisionAuth(handoverTeacher)}
+                    className="rounded-xl bg-blue-600 hover:bg-blue-700 px-3.5 py-1.5 font-bold text-white text-xs shrink-0 shadow-sm transition disabled:opacity-50 flex items-center gap-1.5"
+                  >
+                    <ShieldCheck className="h-3.5 w-3.5" />
+                    <span>{authProvisionLoading ? 'Đang cấp...' : handoverTeacher.authUserId ? 'Cấp Lại Auth' : 'Khởi Tạo Auth'}</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Manual UID Link Toggle */}
+              <div className="pt-1.5 border-t border-slate-200/60 dark:border-slate-800">
+                {!showManualUidInput ? (
+                  <button
+                    type="button"
+                    onClick={() => setShowManualUidInput(true)}
+                    className="text-[10px] text-blue-600 hover:underline dark:text-blue-400 font-medium"
+                  >
+                    + Hoặc liên kết thủ công với UID đã tạo sẵn trên Supabase Auth
+                  </button>
+                ) : (
+                  <div className="space-y-1.5 pt-1">
+                    <label className="block text-[10px] font-semibold text-slate-700 dark:text-slate-300">
+                      Nhập Supabase Auth UID:
+                    </label>
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="text"
+                        value={manualAuthUid}
+                        onChange={(e) => setManualAuthUid(e.target.value)}
+                        placeholder="VD: 550e8400-e29b-41d4-a716-446655440000"
+                        className="flex-1 rounded-xl border border-slate-200 bg-white px-2.5 py-1 font-mono text-[11px] text-slate-800 focus:border-blue-500 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 shadow-sm"
+                      />
+                      <button
+                        type="button"
+                        disabled={authProvisionLoading}
+                        onClick={() => handleLinkManualAuthUid(handoverTeacher)}
+                        className="rounded-xl bg-slate-800 hover:bg-slate-900 text-white dark:bg-slate-700 px-3 py-1 font-bold text-xs shrink-0 transition disabled:opacity-50"
+                      >
+                        Lưu UID
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setShowManualUidInput(false)}
+                        className="rounded-xl border border-slate-200 px-2 py-1 text-xs text-slate-500 hover:bg-slate-100 dark:border-slate-700"
+                      >
+                        Đóng
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+
             {/* Actions */}
             <div className="flex flex-col gap-2 pt-2">
               <button
@@ -1039,7 +1355,10 @@ Xác thực: Tài khoản bảo mật qua hệ thống Supabase Auth
               </button>
 
               <button
-                onClick={() => setHandoverTeacher(null)}
+                onClick={() => {
+                  setHandoverTeacher(null);
+                  setAuthProvisionMsg(null);
+                }}
                 className="w-full rounded-xl border border-slate-200 p-2 font-bold text-slate-600 hover:bg-slate-100 dark:border-slate-700 dark:text-slate-300"
               >
                 Đóng

@@ -147,17 +147,6 @@ export const LoginModal: React.FC<LoginModalProps> = ({
         ) : (
           /* Login Form */
           <form onSubmit={handleLoginSubmit} className="mt-5 space-y-4 text-xs">
-            {/* Pilot Banner */}
-            <div className="rounded-xl bg-blue-50 border border-blue-200 p-2.5 text-blue-900 dark:bg-blue-950/50 dark:border-blue-900 dark:text-blue-200">
-              <div className="font-extrabold flex items-center gap-1.5 text-[11px]">
-                <KeyRound className="h-3.5 w-3.5 text-blue-600 dark:text-blue-400" />
-                <span>Chế độ xác thực: Supabase Auth (Giai đoạn C1)</span>
-              </div>
-              <p className="mt-0.5 text-[10px] text-blue-700 dark:text-blue-300">
-                Tài khoản thí điểm đã kích hoạt: <strong className="font-mono">anhntl78@fpt.edu.vn</strong> (GV023)
-              </p>
-            </div>
-
             {/* Email input */}
             <div>
               <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1.5">
@@ -171,7 +160,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({
                     setUsernameInput(e.target.value);
                     if (errorMessage) setErrorMessage(null);
                   }}
-                  placeholder="ví dụ: anhntl78@fpt.edu.vn"
+                  placeholder="ví dụ: abicamlenhieutien@fpt.edu.vn"
                   disabled={isLoading}
                   className="w-full rounded-xl border border-slate-200 bg-white py-2.5 pl-9 pr-3 text-xs font-semibold focus:border-blue-500 focus:outline-none dark:border-slate-700 dark:bg-slate-900 dark:text-white shadow-sm disabled:opacity-60"
                   autoFocus

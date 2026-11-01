@@ -580,7 +580,7 @@ export const StudentList: React.FC = () => {
             <GraduationCap className="h-4 w-4" />
             <span>Hồ sơ Học sinh Nội trú Toàn trường</span>
           </div>
-          <h2 className="text-xl font-extrabold text-slate-900 dark:text-white mt-1">
+          <h2 className="text-xl font-extrabold text-purple-600 dark:text-purple-400 mt-1">
             Quản lý Học sinh Nội trú Toàn trường & Hồ sơ Theo dõi Đặc biệt
           </h2>
           <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">

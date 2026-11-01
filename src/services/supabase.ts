@@ -2,15 +2,21 @@ import { createClient, SupabaseClient } from '@supabase/supabase-js';
 
 // Đọc biến môi trường theo chuẩn tĩnh của Vite:
 // Vite sẽ biên dịch tĩnh thay thế trực tiếp chuỗi 'import.meta.env.VITE_*' bằng giá trị thực tế tại thời điểm build.
-const supabaseUrl = (
+export const supabaseUrl = (
   (typeof import.meta !== 'undefined' && import.meta.env?.VITE_SUPABASE_URL as string | undefined) ||
   (typeof process !== 'undefined' && process.env?.VITE_SUPABASE_URL) ||
   ''
 ).trim();
 
-const supabaseKey = (
-  (typeof import.meta !== 'undefined' && import.meta.env?.VITE_SUPABASE_PUBLISHABLE_KEY as string | undefined) ||
-  (typeof process !== 'undefined' && process.env?.VITE_SUPABASE_PUBLISHABLE_KEY) ||
+export const supabaseKey = (
+  (typeof import.meta !== 'undefined' && (
+    (import.meta.env?.VITE_SUPABASE_PUBLISHABLE_KEY as string | undefined) ||
+    (import.meta.env?.VITE_SUPABASE_ANON_KEY as string | undefined)
+  )) ||
+  (typeof process !== 'undefined' && (
+    process.env?.VITE_SUPABASE_PUBLISHABLE_KEY ||
+    process.env?.VITE_SUPABASE_ANON_KEY
+  )) ||
   ''
 ).trim();
 
